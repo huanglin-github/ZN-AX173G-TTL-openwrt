@@ -287,7 +287,7 @@ class App:
         body.pack(fill="both", expand=True, padx=12, pady=10)
         left = tk.Frame(body, bg=BG)
         left.pack(side="left", fill="both", expand=True)
-        right = tk.Frame(body, bg=BG, width=400)
+        right = tk.Frame(body, bg=BG, width=392)
         right.pack(side="right", fill="y", padx=(12, 0))
         right.pack_propagate(False)
 
@@ -352,29 +352,32 @@ class App:
         def card(title):
             cf = tk.Frame(col, bg=CARD, highlightthickness=1,
                           highlightbackground=LINE)
-            cf.pack(fill="x", pady=(0, 10))
+            cf.pack(fill="x", pady=(0, 6))
             tk.Label(cf, text=title, bg=CARD, fg=SUB,
                      font=("Microsoft YaHei UI", 9, "bold")).pack(
-                anchor="w", padx=12, pady=(10, 4))
+                anchor="w", padx=10, pady=(7, 2))
             return cf
 
-        def grow(cf, text, cmd, style=BTN, pad=(0, 6)):
+        def grow(cf, text, cmd, style=BTN, pad=(0, 4)):
             b = tk.Button(cf, text=text, command=cmd, **style)
-            b.pack(fill="x", padx=12, pady=pad)
+            b.pack(fill="x", padx=10, pady=pad)
             self.btns.append(b)
             return b
 
+        def grow2(cf, t1, c1, t2, c2, s1=BTN, s2=BTN):
+            f = tk.Frame(cf, bg=CARD)
+            f.pack(fill="x", padx=10, pady=(0, 4))
+            b = tk.Button(f, text=t1, command=c1, **s1)
+            b.pack(side="left", fill="x", expand=True)
+            self.btns.append(b)
+            b = tk.Button(f, text=t2, command=c2, **s2)
+            b.pack(side="left", fill="x", expand=True, padx=(6, 0))
+            self.btns.append(b)
+
         # ① 设备控制
         cf = card("① 设备控制")
-        f = tk.Frame(cf, bg=CARD)
-        f.pack(fill="x", padx=12, pady=(0, 10))
-        b = tk.Button(f, text="设备自检",
-                      command=lambda: self.run_task(self.task_selfcheck), **BTN)
-        b.pack(side="left", fill="x", expand=True)
-        self.btns.append(b)
-        b = tk.Button(f, text="重启设备", command=self.ask_reboot, **BTN)
-        b.pack(side="left", fill="x", expand=True, padx=(8, 0))
-        self.btns.append(b)
+        grow2(cf, "设备自检", lambda: self.run_task(self.task_selfcheck),
+              "重启设备", self.ask_reboot)
         grow(cf, "进 U-Boot（重启并打断 autoboot）",
              lambda: self.run_task(self.task_enter_uboot))
 
@@ -383,57 +386,46 @@ class App:
         self.img_var = tk.StringVar(
             value=DEFAULT_IMG if os.path.isfile(DEFAULT_IMG) else "")
         fe = tk.Frame(cf, bg=CARD)
-        fe.pack(fill="x", padx=12)
-        tk.Label(fe, text="固件镜像", bg=CARD, fg=SUB,
-                 font=("Microsoft YaHei UI", 9)).pack(anchor="w")
+        fe.pack(fill="x", padx=10)
         tk.Entry(fe, textvariable=self.img_var, bg="#f6f8fb", fg=FG,
-                 insertbackground=ACC, relief="flat", font=("Consolas", 9),
+                 insertbackground=ACC, relief="flat", font=("Consolas", 8),
                  highlightthickness=1, highlightbackground=LINE).pack(
-            fill="x", ipady=5, pady=(2, 4))
-        tk.Button(fe, text="浏览选择镜像文件…", command=self.pick_image,
-                  **BTN).pack(fill="x")
+            fill="x", ipady=4, pady=(0, 3))
         fo = tk.Frame(cf, bg=CARD)
-        fo.pack(fill="x", padx=12, pady=(8, 0))
-        tk.Label(fo, text="目标偏移", bg=CARD, fg=SUB,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left")
+        fo.pack(fill="x", padx=10, pady=(0, 2))
+        tk.Button(fo, text="浏览镜像…", command=self.pick_image, **BTN).pack(
+            side="left", fill="x", expand=True)
+        tk.Label(fo, text="偏移", bg=CARD, fg=SUB,
+                 font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(8, 2))
         self.addr_var = tk.StringVar(value="0x1ec0000")
         tk.Entry(fo, textvariable=self.addr_var, bg="#f6f8fb", fg=FG,
-                 insertbackground=ACC, relief="flat", width=13,
+                 insertbackground=ACC, relief="flat", width=11,
                  font=("Consolas", 9), highlightthickness=1,
-                 highlightbackground=LINE).pack(side="left", padx=8, ipady=4)
-        tk.Label(fo, text="默认 0x1ec0000 (firmware)", bg=CARD, fg=SUB,
-                 font=("Microsoft YaHei UI", 8)).pack(side="left")
+                 highlightbackground=LINE).pack(side="left", ipady=3)
         self.opt_boot = tk.BooleanVar(value=True)
         self.opt_bootcmd = tk.BooleanVar(value=False)
-        for var, text in ((self.opt_boot, "写完后从 RAM 启动验证"),
+        for var, text in ((self.opt_boot, "写完从 RAM 启动验证"),
                           (self.opt_bootcmd, "顺便固化 bootcmd")):
             tk.Checkbutton(cf, text=text, variable=var, bg=CARD, fg=FG,
                            activebackground=CARD, activeforeground=FG,
                            selectcolor="#f6f8fb", anchor="w",
                            font=("Microsoft YaHei UI", 9), bd=0).pack(
-                fill="x", padx=12)
+                fill="x", padx=10)
         grow(cf, "立即刷机（TFTP → 擦写 → 校验）", self.ask_flash,
-             BTN_PRIMARY, pad=(12, 8))
+             BTN_PRIMARY, pad=(10, 6))
         grow(cf, "仅加载到 RAM 验证（不写 flash）",
-             lambda: self.run_task(self.task_flash, True), pad=(12, 10))
+             lambda: self.run_task(self.task_flash, True), pad=(10, 8))
 
         # ③ 备份与还原
         cf = card("③ 备份与还原")
         grow(cf, "备份原厂固件（masterbank 30MB → PC）",
              lambda: self.run_task(self.task_backup_stock))
-        grow(cf, "一键备份分区（选分区，OpenWrt 在线）",
-             self.ask_backup)
-        grow(cf, "从备份还原原厂固件（写 masterbank，高危）",
-             self.ask_restore_stock_fw, BTN_RED)
-        grow(cf, "切换回原厂系统（改 bootcmd 引导）",
-             self.ask_restore)
-        grow(cf, "分区查看 / 编辑 mtdparts",
-             lambda: self.run_task(self.task_partitions), pad=(12, 10))
-
-        # ④ U-Boot 环境
-        cf = card("④ U-Boot 环境")
+        grow2(cf, "备份分区…", self.ask_backup,
+              "分区/mtdparts", lambda: self.run_task(self.task_partitions))
+        grow2(cf, "还原原厂固件（写 masterbank）", self.ask_restore_stock_fw,
+              "切换原厂引导", self.ask_restore, BTN_RED, BTN)
         grow(cf, "固化 bootcmd（断电自动进 OpenWrt）",
-             lambda: self.run_task(self.task_fix_bootcmd), pad=(12, 10))
+             lambda: self.run_task(self.task_fix_bootcmd), pad=(10, 8))
 
         self.refresh_ports()
         self._append("ZN-AX173G TTL 工具台已就绪\n"
