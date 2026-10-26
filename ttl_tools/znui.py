@@ -388,20 +388,20 @@ class App:
         fe = tk.Frame(cf, bg=CARD)
         fe.pack(fill="x", padx=10)
         tk.Entry(fe, textvariable=self.img_var, bg="#f6f8fb", fg=FG,
-                 insertbackground=ACC, relief="flat", font=("Consolas", 8),
+                 insertbackground=ACC, relief="flat", font=("Consolas", 9),
                  highlightthickness=1, highlightbackground=LINE).pack(
-            fill="x", ipady=4, pady=(0, 3))
-        fo = tk.Frame(cf, bg=CARD)
-        fo.pack(fill="x", padx=10, pady=(0, 2))
-        tk.Button(fo, text="浏览镜像…", command=self.pick_image, **BTN).pack(
-            side="left", fill="x", expand=True)
-        tk.Label(fo, text="偏移", bg=CARD, fg=SUB,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(8, 2))
+            fill="x", ipady=6, pady=(0, 5))
+        f2 = tk.Frame(cf, bg=CARD)
+        f2.pack(fill="x", padx=10, pady=(0, 5))
+        tk.Button(f2, text="浏览镜像…", command=self.pick_image,
+                  **BTN).pack(side="left", fill="x", expand=True)
+        tk.Label(f2, text=" 偏移 ", bg=CARD, fg=SUB,
+                 font=("Microsoft YaHei UI", 9)).pack(side="left")
         self.addr_var = tk.StringVar(value="0x1ec0000")
-        tk.Entry(fo, textvariable=self.addr_var, bg="#f6f8fb", fg=FG,
+        tk.Entry(f2, textvariable=self.addr_var, bg="#f6f8fb", fg=FG,
                  insertbackground=ACC, relief="flat", width=11,
                  font=("Consolas", 9), highlightthickness=1,
-                 highlightbackground=LINE).pack(side="left", ipady=3)
+                 highlightbackground=LINE).pack(side="left", ipady=6)
         self.opt_boot = tk.BooleanVar(value=True)
         self.opt_bootcmd = tk.BooleanVar(value=False)
         for var, text in ((self.opt_boot, "写完从 RAM 启动验证"),
@@ -410,7 +410,7 @@ class App:
                            activebackground=CARD, activeforeground=FG,
                            selectcolor="#f6f8fb", anchor="w",
                            font=("Microsoft YaHei UI", 9), bd=0).pack(
-                fill="x", padx=10)
+                fill="x", padx=13)
         grow(cf, "立即刷机（TFTP → 擦写 → 校验）", self.ask_flash,
              BTN_PRIMARY, pad=(10, 6))
         grow(cf, "仅加载到 RAM 验证（不写 flash）",
