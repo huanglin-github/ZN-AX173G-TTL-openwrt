@@ -78,14 +78,15 @@ DEFAULT_IMG = os.path.join(
     HERE, "firmware_191mb",
     "openwrt-airoha-en7523-airoha_en7523-ax3000-router-squashfs-sysupgrade.bin")
 
-BG = "#12181e"
-BG2 = "#1a232b"
-FG = "#cfdae6"
-ACC = "#3fa7ff"
-BTN = dict(bg="#243240", fg="#e6edf3", activebackground="#2f4354",
-           activeforeground="#ffffff", relief="flat", bd=0, padx=10, pady=7,
+BG = "#f3f3f3"
+BG2 = "#ffffff"
+FG = "#1b1b1b"
+ACC = "#0067c0"
+BTN = dict(bg="#fbfbfb", fg="#1b1b1b", activebackground="#e8e8e8",
+           activeforeground="#000000", relief="flat", bd=0, padx=10, pady=7,
            font=("Microsoft YaHei UI", 9), cursor="hand2")
-BTN_RED = dict(BTN, bg="#6d2222", activebackground="#8d2c2c")
+BTN_RED = dict(BTN, bg="#fdf3f3", fg="#c42b1c", activebackground="#f5d9d9",
+               activeforeground="#c42b1c")
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 
@@ -258,7 +259,7 @@ class App:
         self.btn_conn = tk.Button(top, text="连接", command=self.toggle_connect, **BTN)
         self.btn_conn.pack(side="left", padx=10)
         self.conn_var = tk.StringVar(value="未连接")
-        tk.Label(top, textvariable=self.conn_var, bg=BG, fg="#7f8c99",
+        tk.Label(top, textvariable=self.conn_var, bg=BG, fg="#616161",
                  font=("Microsoft YaHei UI", 9)).pack(side="left", padx=6)
         self.stat_var = tk.StringVar(value="就绪")
         tk.Label(top, textvariable=self.stat_var, bg=BG, fg=ACC,
@@ -274,9 +275,10 @@ class App:
 
         term = tk.Frame(left, bg=BG2)
         term.pack(fill="both", expand=True)
-        self.txt = tk.Text(term, bg="#0a0e12", fg="#c9d6e2", insertbackground=ACC,
+        self.txt = tk.Text(term, bg="#1e1e1e", fg="#d4d4d4", insertbackground=ACC,
                            font=("Consolas", 9), wrap="char", bd=0, padx=8, pady=6,
-                           selectbackground="#2f4354")
+                           selectbackground="#094771",
+                           highlightthickness=1, highlightbackground="#e1e1e1")
         self.txt.configure(state="normal")
         sb = tk.Scrollbar(term, command=self.txt.yview, bg=BG2, bd=0,
                           troughcolor=BG2, activebackground="#3a4b5c")
@@ -287,8 +289,9 @@ class App:
 
         row = tk.Frame(left, bg=BG)
         row.pack(fill="x", pady=(8, 0))
-        self.ent = tk.Entry(row, bg="#0a0e12", fg="#c9d6e2", insertbackground=ACC,
-                            relief="flat", font=("Consolas", 10))
+        self.ent = tk.Entry(row, bg="#fbfbfb", fg="#1b1b1b", insertbackground=ACC,
+                            relief="flat", font=("Consolas", 10),
+                            highlightthickness=1, highlightbackground="#e1e1e1")
         self.ent.pack(side="left", fill="x", expand=True, ipady=6)
         self.ent.bind("<Return>", self._on_enter)
         self.ent.bind("<Up>", self._hist_prev)
@@ -317,17 +320,17 @@ class App:
         f = tk.Frame(right, bg=BG2)
         f.pack(fill="x", padx=12)
         self.img_var = tk.StringVar(value=DEFAULT_IMG if os.path.isfile(DEFAULT_IMG) else "")
-        tk.Entry(f, textvariable=self.img_var, bg="#0a0e12", fg="#c9d6e2",
+        tk.Entry(f, textvariable=self.img_var, bg="#fbfbfb", fg="#1b1b1b",
                  insertbackground=ACC, relief="flat",
                  font=("Consolas", 8)).pack(side="left", fill="x", expand=True, ipady=5)
         tk.Button(f, text="浏览", command=self.pick_image, **BTN).pack(side="left", padx=(6, 0))
 
         f2 = tk.Frame(right, bg=BG2)
         f2.pack(fill="x", padx=12, pady=(6, 0))
-        tk.Label(f2, text="目标偏移", bg=BG2, fg="#8fa3b5",
+        tk.Label(f2, text="目标偏移", bg=BG2, fg="#616161",
                  font=("Microsoft YaHei UI", 9)).pack(side="left")
         self.addr_var = tk.StringVar(value="0x1ec0000")
-        tk.Entry(f2, textvariable=self.addr_var, bg="#0a0e12", fg="#c9d6e2",
+        tk.Entry(f2, textvariable=self.addr_var, bg="#fbfbfb", fg="#1b1b1b",
                  insertbackground=ACC, relief="flat", width=12,
                  font=("Consolas", 9)).pack(side="left", padx=6, ipady=4)
 
@@ -337,7 +340,7 @@ class App:
                           (self.opt_bootcmd, "顺便固化 bootcmd（setenv+saveenv）")):
             cb = tk.Checkbutton(right, text=text, variable=var, bg=BG2, fg=FG,
                                 activebackground=BG2, activeforeground=FG,
-                                selectcolor="#0a0e12", anchor="w",
+                                selectcolor="#fbfbfb", anchor="w",
                                 font=("Microsoft YaHei UI", 9), bd=0)
             cb.pack(fill="x", padx=12)
 
@@ -379,8 +382,8 @@ class App:
                      "安全网：masterbank 原厂固件从未被写，随时可用「还原原厂系统」回退\n\n")
 
     def _section(self, parent, title):
-        tk.Frame(parent, bg="#2b3a47", height=1).pack(fill="x", padx=12, pady=(12, 6))
-        tk.Label(parent, text=title, bg=BG2, fg="#7f8c99",
+        tk.Frame(parent, bg="#e1e1e1", height=1).pack(fill="x", padx=12, pady=(12, 6))
+        tk.Label(parent, text=title, bg=BG2, fg="#616161",
                  font=("Microsoft YaHei UI", 8, "bold")).pack(anchor="w", padx=12, pady=(0, 4))
 
     # ---------------- 日志
@@ -937,7 +940,7 @@ class App:
                 tk.Label(d, text=label, bg=BG2, fg=FG, justify="left",
                          font=("Microsoft YaHei UI", 9)).pack(
                     anchor="w", padx=10, pady=(10, 4))
-            txt = tk.Text(d, bg="#0a0e12", fg="#c9d6e2", font=("Consolas", 10),
+            txt = tk.Text(d, bg="#fbfbfb", fg="#1b1b1b", font=("Consolas", 10),
                           bd=0, padx=8, pady=6, height=10)
             txt.pack(fill="both", expand=True, padx=10)
             txt.insert("1.0", initial)
@@ -985,7 +988,7 @@ class App:
                                % (name, "mtd" + mtdn, human(size)),
                                variable=v, bg=BG2, fg=FG,
                                activebackground=BG2, activeforeground=FG,
-                               selectcolor="#0a0e12", anchor="w",
+                               selectcolor="#fbfbfb", anchor="w",
                                font=("Microsoft YaHei UI", 9)).pack(fill="x")
 
             def ok():
