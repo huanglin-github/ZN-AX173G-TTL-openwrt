@@ -78,15 +78,23 @@ DEFAULT_IMG = os.path.join(
     HERE, "firmware_191mb",
     "openwrt-airoha-en7523-airoha_en7523-ax3000-router-squashfs-sysupgrade.bin")
 
-BG = "#f3f3f3"
-BG2 = "#ffffff"
-FG = "#1b1b1b"
-ACC = "#0067c0"
-BTN = dict(bg="#fbfbfb", fg="#1b1b1b", activebackground="#e8e8e8",
-           activeforeground="#000000", relief="flat", bd=0, padx=10, pady=7,
+BG = "#eef1f6"          # 窗口底
+CARD = "#ffffff"        # 卡片底
+BG2 = CARD              # 兼容旧引用
+FG = "#21262f"          # 主文字
+SUB = "#69738a"         # 次文字
+ACC = "#3f6df0"         # 靛蓝强调
+LINE = "#dde3ec"        # 边框
+BTN = dict(bg="#f4f6fa", fg="#2a3140", activebackground="#e5eaf4",
+           activeforeground="#1f2430", relief="flat", bd=0, padx=10, pady=7,
            font=("Microsoft YaHei UI", 9), cursor="hand2")
-BTN_RED = dict(BTN, bg="#fdf3f3", fg="#c42b1c", activebackground="#f5d9d9",
-               activeforeground="#c42b1c")
+BTN_PRIMARY = dict(bg="#3f6df0", fg="#ffffff", activebackground="#2f57d0",
+                   activeforeground="#ffffff", relief="flat", bd=0, padx=10,
+                   pady=7, font=("Microsoft YaHei UI", 9, "bold"),
+                   cursor="hand2")
+BTN_RED = dict(bg="#fff5f5", fg="#c0392b", activebackground="#ffe1e1",
+               activeforeground="#a93226", relief="flat", bd=0, padx=10,
+               pady=7, font=("Microsoft YaHei UI", 9), cursor="hand2")
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 
@@ -238,148 +246,207 @@ class App:
     def build_ui(self):
         r = self.root
         r.title("ZN-AX173G (EN7523) TTL 工具台")
-        r.geometry("1200x760")
+        r.geometry("1220x780")
         r.configure(bg=BG)
-        r.minsize(980, 620)
+        r.minsize(1020, 660)
+        try:
+            ttk.Style().theme_use("vista")
+        except Exception:
+            pass
 
-        top = tk.Frame(r, bg=BG)
-        top.pack(fill="x", padx=10, pady=(10, 6))
-        tk.Label(top, text="串口", bg=BG, fg=FG,
+        # ---- 顶栏
+        top = tk.Frame(r, bg=CARD, highlightthickness=1,
+                       highlightbackground=LINE)
+        top.pack(fill="x")
+        inner = tk.Frame(top, bg=CARD)
+        inner.pack(fill="x", padx=14, pady=9)
+        tk.Label(inner, text="ZN-AX173G TTL 工具台", bg=CARD, fg=FG,
+                 font=("Microsoft YaHei UI", 11, "bold")).pack(side="left")
+        self.conn_var = tk.StringVar(value="未连接")
+        tk.Label(inner, textvariable=self.conn_var, bg=CARD, fg=SUB,
+                 font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(14, 0))
+        bar = tk.Frame(inner, bg=CARD)
+        bar.pack(side="right")
+        tk.Label(bar, text="串口", bg=CARD, fg=SUB,
                  font=("Microsoft YaHei UI", 9)).pack(side="left")
         self.port_var = tk.StringVar(value="COM6")
-        self.cb_port = ttk.Combobox(top, textvariable=self.port_var, width=30,
+        self.cb_port = ttk.Combobox(bar, textvariable=self.port_var, width=22,
                                     state="readonly")
         self.cb_port.pack(side="left", padx=6)
-        tk.Button(top, text="刷新", command=self.refresh_ports, **BTN).pack(side="left")
-        tk.Label(top, text="波特率", bg=BG, fg=FG,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(14, 4))
+        tk.Button(bar, text="刷新", command=self.refresh_ports, **BTN).pack(side="left")
         self.baud_var = tk.StringVar(value="115200")
-        ttk.Combobox(top, textvariable=self.baud_var, width=9, state="readonly",
-                     values=["115200", "57600", "38400", "9600"]).pack(side="left")
-        self.btn_conn = tk.Button(top, text="连接", command=self.toggle_connect, **BTN)
-        self.btn_conn.pack(side="left", padx=10)
-        self.conn_var = tk.StringVar(value="未连接")
-        tk.Label(top, textvariable=self.conn_var, bg=BG, fg="#616161",
-                 font=("Microsoft YaHei UI", 9)).pack(side="left", padx=6)
-        self.stat_var = tk.StringVar(value="就绪")
-        tk.Label(top, textvariable=self.stat_var, bg=BG, fg=ACC,
-                 font=("Microsoft YaHei UI", 9, "bold")).pack(side="right")
+        ttk.Combobox(bar, textvariable=self.baud_var, width=7, state="readonly",
+                     values=["115200", "57600", "38400", "9600"]).pack(
+            side="left", padx=6)
+        self.btn_conn = tk.Button(bar, text="连接", command=self.toggle_connect,
+                                  **BTN_PRIMARY)
+        self.btn_conn.pack(side="left", padx=(6, 0))
 
+        # ---- 主体
         body = tk.Frame(r, bg=BG)
-        body.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        body.pack(fill="both", expand=True, padx=12, pady=10)
         left = tk.Frame(body, bg=BG)
         left.pack(side="left", fill="both", expand=True)
-        right = tk.Frame(body, bg=BG2, width=372)
-        right.pack(side="right", fill="y", padx=(10, 0))
+        right = tk.Frame(body, bg=BG, width=400)
+        right.pack(side="right", fill="y", padx=(12, 0))
         right.pack_propagate(False)
 
-        term = tk.Frame(left, bg=BG2)
-        term.pack(fill="both", expand=True)
-        self.txt = tk.Text(term, bg="#1e1e1e", fg="#d4d4d4", insertbackground=ACC,
+        # 终端卡片
+        termcard = tk.Frame(left, bg=CARD, highlightthickness=1,
+                            highlightbackground=LINE)
+        termcard.pack(fill="both", expand=True)
+        th = tk.Frame(termcard, bg=CARD)
+        th.pack(fill="x", padx=10, pady=(8, 4))
+        tk.Label(th, text="串口日志", bg=CARD, fg=FG,
+                 font=("Microsoft YaHei UI", 9, "bold")).pack(side="left")
+        tk.Button(th, text="清屏", command=self.clear_log, **BTN).pack(side="right")
+        tk.Button(th, text="保存日志", command=self.save_log, **BTN).pack(
+            side="right", padx=(0, 6))
+        term = tk.Frame(termcard, bg=CARD)
+        term.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.txt = tk.Text(term, bg="#24292f", fg="#d4d4d4", insertbackground=ACC,
                            font=("Consolas", 9), wrap="char", bd=0, padx=8, pady=6,
-                           selectbackground="#094771",
-                           highlightthickness=1, highlightbackground="#e1e1e1")
-        self.txt.configure(state="normal")
-        sb = tk.Scrollbar(term, command=self.txt.yview, bg=BG2, bd=0,
-                          troughcolor=BG2, activebackground="#3a4b5c")
+                           selectbackground="#094771", relief="flat")
+        sb = tk.Scrollbar(term, command=self.txt.yview, bd=0)
         self.txt.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.txt.pack(side="left", fill="both", expand=True)
         self.txt.bind("<Key>", self._text_key)
 
+        # 命令行 + 进度
         row = tk.Frame(left, bg=BG)
-        row.pack(fill="x", pady=(8, 0))
-        self.ent = tk.Entry(row, bg="#fbfbfb", fg="#1b1b1b", insertbackground=ACC,
+        row.pack(fill="x", pady=(8, 4))
+        self.ent = tk.Entry(row, bg=CARD, fg=FG, insertbackground=ACC,
                             relief="flat", font=("Consolas", 10),
-                            highlightthickness=1, highlightbackground="#e1e1e1")
-        self.ent.pack(side="left", fill="x", expand=True, ipady=6)
+                            highlightthickness=1, highlightbackground=LINE)
+        self.ent.pack(side="left", fill="x", expand=True, ipady=7)
         self.ent.bind("<Return>", self._on_enter)
         self.ent.bind("<Up>", self._hist_prev)
         self.ent.bind("<Down>", self._hist_next)
         b = tk.Button(row, text="发送", command=self.send_line, **BTN)
         b.pack(side="left", padx=(8, 0))
         self.btns.append(b)
+        prow = tk.Frame(left, bg=BG)
+        prow.pack(fill="x", pady=(0, 0))
+        self.stat_var = tk.StringVar(value="就绪")
+        tk.Label(prow, textvariable=self.stat_var, bg=BG, fg=ACC,
+                 font=("Microsoft YaHei UI", 9, "bold"), width=46,
+                 anchor="w").pack(side="left")
+        self.pbar = ttk.Progressbar(prow, mode="determinate", length=200)
+        self.pbar.pack(side="right", fill="x", expand=True, padx=(10, 0))
 
-        # ---- 右侧操作区
-        self._section(right, "设备")
-        rowf = tk.Frame(right, bg=BG2)
-        rowf.pack(fill="x", padx=12, pady=(0, 6))
-        b = tk.Button(rowf, text="设备自检", command=lambda: self.run_task(self.task_selfcheck), **BTN)
+        # ---- 右侧：可滚动卡片列
+        canvas = tk.Canvas(right, bg=BG, bd=0, highlightthickness=0)
+        vsb = tk.Scrollbar(right, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        col = tk.Frame(canvas, bg=BG)
+        canvas.create_window((0, 0), window=col, anchor="nw", tags="inner")
+        col.bind("<Configure>",
+                 lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind_all("<MouseWheel>",
+                        lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+        self._col = col
+
+        def card(title):
+            cf = tk.Frame(col, bg=CARD, highlightthickness=1,
+                          highlightbackground=LINE)
+            cf.pack(fill="x", pady=(0, 10))
+            tk.Label(cf, text=title, bg=CARD, fg=SUB,
+                     font=("Microsoft YaHei UI", 9, "bold")).pack(
+                anchor="w", padx=12, pady=(10, 4))
+            return cf
+
+        def grow(cf, text, cmd, style=BTN, pad=(0, 6)):
+            b = tk.Button(cf, text=text, command=cmd, **style)
+            b.pack(fill="x", padx=12, pady=pad)
+            self.btns.append(b)
+            return b
+
+        # ① 设备控制
+        cf = card("① 设备控制")
+        f = tk.Frame(cf, bg=CARD)
+        f.pack(fill="x", padx=12, pady=(0, 10))
+        b = tk.Button(f, text="设备自检",
+                      command=lambda: self.run_task(self.task_selfcheck), **BTN)
         b.pack(side="left", fill="x", expand=True)
         self.btns.append(b)
-        b = tk.Button(rowf, text="重启设备", command=self.ask_reboot, **BTN)
-        b.pack(side="left", fill="x", expand=True, padx=(6, 0))
+        b = tk.Button(f, text="重启设备", command=self.ask_reboot, **BTN)
+        b.pack(side="left", fill="x", expand=True, padx=(8, 0))
         self.btns.append(b)
+        grow(cf, "进 U-Boot（重启并打断 autoboot）",
+             lambda: self.run_task(self.task_enter_uboot))
 
-        b = tk.Button(right, text="进 U-Boot（重启并打断 autoboot）",
-                      command=lambda: self.run_task(self.task_enter_uboot), **BTN)
-        b.pack(fill="x", padx=12, pady=(0, 6))
-        self.btns.append(b)
-
-        self._section(right, "刷机镜像")
-        f = tk.Frame(right, bg=BG2)
-        f.pack(fill="x", padx=12)
-        self.img_var = tk.StringVar(value=DEFAULT_IMG if os.path.isfile(DEFAULT_IMG) else "")
-        tk.Entry(f, textvariable=self.img_var, bg="#fbfbfb", fg="#1b1b1b",
-                 insertbackground=ACC, relief="flat",
-                 font=("Consolas", 8)).pack(side="left", fill="x", expand=True, ipady=5)
-        tk.Button(f, text="浏览", command=self.pick_image, **BTN).pack(side="left", padx=(6, 0))
-
-        f2 = tk.Frame(right, bg=BG2)
-        f2.pack(fill="x", padx=12, pady=(6, 0))
-        tk.Label(f2, text="目标偏移", bg=BG2, fg="#616161",
+        # ② 刷写 OpenWrt
+        cf = card("② 刷写 OpenWrt")
+        self.img_var = tk.StringVar(
+            value=DEFAULT_IMG if os.path.isfile(DEFAULT_IMG) else "")
+        fe = tk.Frame(cf, bg=CARD)
+        fe.pack(fill="x", padx=12)
+        tk.Label(fe, text="固件镜像", bg=CARD, fg=SUB,
+                 font=("Microsoft YaHei UI", 9)).pack(anchor="w")
+        tk.Entry(fe, textvariable=self.img_var, bg="#f6f8fb", fg=FG,
+                 insertbackground=ACC, relief="flat", font=("Consolas", 9),
+                 highlightthickness=1, highlightbackground=LINE).pack(
+            fill="x", ipady=5, pady=(2, 4))
+        tk.Button(fe, text="浏览选择镜像文件…", command=self.pick_image,
+                  **BTN).pack(fill="x")
+        fo = tk.Frame(cf, bg=CARD)
+        fo.pack(fill="x", padx=12, pady=(8, 0))
+        tk.Label(fo, text="目标偏移", bg=CARD, fg=SUB,
                  font=("Microsoft YaHei UI", 9)).pack(side="left")
         self.addr_var = tk.StringVar(value="0x1ec0000")
-        tk.Entry(f2, textvariable=self.addr_var, bg="#fbfbfb", fg="#1b1b1b",
-                 insertbackground=ACC, relief="flat", width=12,
-                 font=("Consolas", 9)).pack(side="left", padx=6, ipady=4)
-
+        tk.Entry(fo, textvariable=self.addr_var, bg="#f6f8fb", fg=FG,
+                 insertbackground=ACC, relief="flat", width=13,
+                 font=("Consolas", 9), highlightthickness=1,
+                 highlightbackground=LINE).pack(side="left", padx=8, ipady=4)
+        tk.Label(fo, text="默认 0x1ec0000 (firmware)", bg=CARD, fg=SUB,
+                 font=("Microsoft YaHei UI", 8)).pack(side="left")
         self.opt_boot = tk.BooleanVar(value=True)
         self.opt_bootcmd = tk.BooleanVar(value=False)
         for var, text in ((self.opt_boot, "写完后从 RAM 启动验证"),
-                          (self.opt_bootcmd, "顺便固化 bootcmd（setenv+saveenv）")):
-            cb = tk.Checkbutton(right, text=text, variable=var, bg=BG2, fg=FG,
-                                activebackground=BG2, activeforeground=FG,
-                                selectcolor="#fbfbfb", anchor="w",
-                                font=("Microsoft YaHei UI", 9), bd=0)
-            cb.pack(fill="x", padx=12)
+                          (self.opt_bootcmd, "顺便固化 bootcmd")):
+            tk.Checkbutton(cf, text=text, variable=var, bg=CARD, fg=FG,
+                           activebackground=CARD, activeforeground=FG,
+                           selectcolor="#f6f8fb", anchor="w",
+                           font=("Microsoft YaHei UI", 9), bd=0).pack(
+                fill="x", padx=12)
+        grow(cf, "立即刷机（TFTP → 擦写 → 校验）", self.ask_flash,
+             BTN_PRIMARY, pad=(12, 8))
+        grow(cf, "仅加载到 RAM 验证（不写 flash）",
+             lambda: self.run_task(self.task_flash, True), pad=(12, 10))
 
-        b = tk.Button(right, text="TFTP 刷机（擦写 firmware 分区）",
-                      command=self.ask_flash, **BTN_RED)
-        b.pack(fill="x", padx=12, pady=(8, 4))
-        self.btns.append(b)
-        b = tk.Button(right, text="只加载到 RAM 验证（不写 flash）",
-                      command=lambda: self.run_task(self.task_flash, True), **BTN)
-        b.pack(fill="x", padx=12, pady=(0, 6))
-        self.btns.append(b)
+        # ③ 备份与还原
+        cf = card("③ 备份与还原")
+        grow(cf, "备份原厂固件（masterbank 30MB → PC）",
+             lambda: self.run_task(self.task_backup_stock))
+        grow(cf, "一键备份分区（选分区，OpenWrt 在线）",
+             self.ask_backup)
+        grow(cf, "从备份还原原厂固件（写 masterbank，高危）",
+             self.ask_restore_stock_fw, BTN_RED)
+        grow(cf, "切换回原厂系统（改 bootcmd 引导）",
+             self.ask_restore)
+        grow(cf, "分区查看 / 编辑 mtdparts",
+             lambda: self.run_task(self.task_partitions), pad=(12, 10))
 
-        self._section(right, "维护")
-        b = tk.Button(right, text="一键备份分区（OpenWrt 在线）",
-                      command=self.ask_backup, **BTN)
-        b.pack(fill="x", padx=12, pady=(0, 6))
-        self.btns.append(b)
-        b = tk.Button(right, text="分区查看 / 编辑 mtdparts",
-                      command=lambda: self.run_task(self.task_partitions), **BTN)
-        b.pack(fill="x", padx=12, pady=(0, 6))
-        self.btns.append(b)
-        b = tk.Button(right, text="固化 bootcmd", command=lambda: self.run_task(self.task_fix_bootcmd), **BTN)
-        b.pack(fill="x", padx=12, pady=(0, 6))
-        self.btns.append(b)
-        b = tk.Button(right, text="还原原厂系统", command=self.ask_restore, **BTN_RED)
-        b.pack(fill="x", padx=12, pady=(0, 6))
-        self.btns.append(b)
-
-        rowf2 = tk.Frame(right, bg=BG2)
-        rowf2.pack(fill="x", padx=12, pady=(4, 10), side="bottom")
-        tk.Button(rowf2, text="清屏", command=self.clear_log, **BTN).pack(side="left", fill="x", expand=True)
-        tk.Button(rowf2, text="保存日志", command=self.save_log, **BTN).pack(
-            side="left", fill="x", expand=True, padx=(6, 0))
+        # ④ U-Boot 环境
+        cf = card("④ U-Boot 环境")
+        grow(cf, "固化 bootcmd（断电自动进 OpenWrt）",
+             lambda: self.run_task(self.task_fix_bootcmd), pad=(12, 10))
 
         self.refresh_ports()
         self._append("ZN-AX173G TTL 工具台已就绪\n"
                      "1) 选 COM 口点「连接」  2) 「设备自检」看当前状态\n"
-                     "3) 刷机选镜像后点「TFTP 刷机」，脚本会自动重启打断进 U-Boot\n"
-                     "安全网：masterbank 原厂固件从未被写，随时可用「还原原厂系统」回退\n\n")
+                     "3) 刷机：选镜像 → 「立即刷机」，自动重启打断进 U-Boot\n"
+                     "安全网：原厂固件完好在 masterbank(0xC0000, 30MB)，\n"
+                     "可「备份原厂固件」到 PC；「还原原厂系统」随时引导回原厂。\n\n")
+
+    def pbar_set(self, pct):
+        self.q.put(("pbar", max(0, min(100, int(pct)))))
+
+    def _section(self, parent, title):
+        tk.Frame(parent, bg="#e1e1e1", height=1).pack(fill="x", padx=12, pady=(12, 6))
 
     def _section(self, parent, title):
         tk.Frame(parent, bg="#e1e1e1", height=1).pack(fill="x", padx=12, pady=(12, 6))
@@ -422,6 +489,7 @@ class App:
         out = []
         stat = None
         done = False
+        pbar = None
         while True:
             try:
                 kind, val = self.q.get_nowait()
@@ -431,12 +499,18 @@ class App:
                 out.append(val)
             elif kind == "stat":
                 stat = val
+            elif kind == "pbar":
+                pbar = val
             elif kind == "done":
                 done = True
         if out:
             self._append("".join(out))
         if stat is not None:
             self.stat_var.set(stat)
+        if pbar is not None:
+            self.pbar["value"] = pbar
+            if pbar >= 100:
+                self.root.after(1500, lambda: self.pbar.configure(value=0))
         if done:
             self.busy = False
             self._set_enabled(True)
@@ -855,6 +929,7 @@ class App:
                 sp = sent / 1024.0 / max(time.time() - t0, 0.001)
                 self.stat("TFTP %d%%  %s / %s  %.0f KB/s"
                          % (pct, human(sent), human(size), sp))
+                self.pbar_set(pct)
             tail = self.link.tail()
             if "Bytes transferred" in tail:
                 self.link.wait_until([PROMPT_UBOOT], 60)
@@ -1149,6 +1224,221 @@ class App:
         self.run_cmd("saveenv", 3.0, 300)
         self.log("[OK] mtdparts 已保存\n")
         self.stat("分区已更新")
+
+    # ---------------- 动作：备份原厂固件（masterbank）
+    STOCK_MTD_NAME = "masterbank"
+    STOCK_ADDR = 0xC0000
+
+    def ask_backup_stock(self):
+        if not self.link.is_open:
+            messagebox.showwarning("未连接", "请先连接串口。")
+            return
+        save_dir = filedialog.askdirectory(
+            title="选择原厂固件保存目录（PC 本地）", initialdir=HERE)
+        if not save_dir:
+            return
+        self.run_task(self.task_backup_stock, save_dir)
+
+    def task_backup_stock(self, save_dir):
+        """备份原厂固件 masterbank(0xC0000, 30MB)：未压缩 .bin + crc32 sidecar。"""
+        self.stat("备份原厂固件 ...")
+        if self.detect() != "openwrt":
+            self.log("[X] 备份原厂固件需要设备在 OpenWrt 运行"
+                     "（若当前是原厂系统，请先进 OpenWrt 再备份）\n")
+            self.stat("失败")
+            return
+        out = self.run_cmd("cat /proc/mtd", 1.5, 30)
+        m = re.search(r'mtd(\d+):\s+([0-9a-fA-F]+)\s+"%s"' % self.STOCK_MTD_NAME,
+                      out)
+        if not m:
+            self.log("[X] /proc/mtd 里没有 %s 分区\n" % self.STOCK_MTD_NAME)
+            self.stat("失败")
+            return
+        num, szh = m.group(1), int(m.group(2), 16)
+        fn = "stock_masterbank_0x%X.bin" % self.STOCK_ADDR
+        dst = os.path.join(save_dir, fn)
+        self.stat("读取 %s (%s) ..." % (self.STOCK_MTD_NAME, human(szh)))
+        self.log("[步骤] 设备端读取 /dev/mtd%s (%d 字节)\n" % (num, szh))
+        self.run_cmd("mkdir -p /tmp/bak && rm -f /tmp/bak/*.bin", 1.0, 30)
+        self.run_cmd("dd if=/dev/mtd%s bs=64k of=/tmp/bak/stock.bin 2>/dev/null"
+                     % num, idle=5.0, timeout=max(300, szh // 2048))
+        crc_out = self.run_cmd("crc32 /tmp/bak/stock.bin 2>/dev/null || "
+                               "busybox crc32 /tmp/bak/stock.bin 2>/dev/null",
+                               idle=3.0, timeout=180)
+        mdev = re.findall(r"([0-9a-fA-F]{8})", crc_out.split("crc32")[-1])
+        dev_crc = mdev[-1].lower() if mdev else ""
+
+        self.run_cmd("busybox httpd -p 0.0.0.0:8080 -h /tmp/bak &", 1.2, 30)
+        self.stat("传输原厂固件 ...")
+        try:
+            urllib.request.urlretrieve("http://192.168.1.1:8080/stock.bin", dst)
+        except Exception as e:
+            self.log("[X] 下载失败: %r\n" % e)
+            self.run_cmd("killall httpd 2>/dev/null; rm -rf /tmp/bak", 1.0, 30)
+            self.stat("失败")
+            return
+        self.run_cmd("killall httpd 2>/dev/null; rm -rf /tmp/bak", 1.0, 30)
+
+        size = os.path.getsize(dst)
+        if size != szh:
+            self.log("[X] 大小不符: %d ≠ %d\n" % (size, szh))
+            self.stat("校验失败")
+            return
+        import zlib
+        crc = 0
+        with open(dst, "rb") as f:
+            while True:
+                b = f.read(1 << 20)
+                if not b:
+                    break
+                crc = zlib.crc32(b, crc)
+        pc_crc = "%08x" % (crc & 0xFFFFFFFF)
+        if dev_crc and pc_crc != dev_crc:
+            self.log("[!] 设备 crc32=%s 与 PC crc32=%s 不一致，请重试\n"
+                     % (dev_crc, pc_crc))
+            self.stat("校验失败")
+            return
+        with open(dst + ".crc32.txt", "w") as f:
+            f.write("%s  %s  size=%d\n" % (pc_crc, fn, size))
+        self.log("\n[OK] 原厂固件已备份: %s\n" % dst)
+        self.log("[OK] 大小 %s  crc32=%s%s\n" % (human(size), pc_crc,
+                 ("（与设备端一致）" if dev_crc else "")))
+        self.log("[提示] 之后可用「从备份还原原厂固件」把它写回 flash\n")
+        self.pbar_set(100)
+        self.stat("备份完成")
+
+    # ---------------- 动作：从备份还原原厂固件（写 masterbank，高危）
+    def ask_restore_stock_fw(self):
+        if not self.link.is_open:
+            messagebox.showwarning("未连接", "请先连接串口。")
+            return
+        img = filedialog.askopenfilename(
+            title="选择原厂固件备份文件（stock_masterbank_*.bin）",
+            initialdir=HERE, filetypes=[("bin", "*.bin"), ("所有文件", "*.*")])
+        if not img:
+            return
+        size = os.path.getsize(img)
+        if size != 0x1E00000:
+            if not messagebox.askyesno(
+                    "大小异常",
+                    "文件大小 %d 字节，与 masterbank(%d) 不一致，仍要继续吗？\n"
+                    "（写错大小可能损坏 flash）" % (size, 0x1E00000),
+                    icon="warning"):
+                return
+        if not messagebox.askyesno(
+                "高危操作确认",
+                "即将把以下文件写入 flash 原厂固件区（masterbank 0xC0000）：\n\n"
+                "%s\n大小: %d 字节\n\n"
+                "这是唯一允许写 masterbank 的操作；写入中断电可能导致\n"
+                "原厂固件损坏（OpenWrt 不受影响）。确定继续？"
+                % (img, size), icon="warning"):
+            return
+        self.run_task(self.task_restore_stock_fw, img)
+
+    def task_restore_stock_fw(self, img):
+        self.stat("还原原厂固件 ...")
+        size = os.path.getsize(img)
+        aligned = align_up(size, 0x20000)
+        addr = self.STOCK_ADDR
+        if addr + aligned > 0x1EC0000:
+            self.log("[X] 文件超出 masterbank 区域，拒绝执行\n")
+            self.stat("失败")
+            return
+        import zlib
+        crc = 0
+        with open(img, "rb") as f:
+            while True:
+                b = f.read(1 << 20)
+                if not b:
+                    break
+                crc = zlib.crc32(b, crc)
+        pc_crc = "%08x" % (crc & 0xFFFFFFFF)
+        self.log("\n" + "=" * 66 + "\n")
+        self.log("[高危] %s (%s) -> flash 0x%X\n" % (img, human(size), addr))
+        self.log("PC crc32 = %s\n" % pc_crc)
+
+        fwdir = os.path.dirname(os.path.abspath(img))
+        dst = os.path.join(fwdir, TFTP_NAME)
+        shutil.copyfile(img, dst)
+        self.tftp_name = TFTP_NAME
+
+        self.stat("进入 U-Boot ...")
+        if not self.enter_uboot(True):
+            self.stat("失败")
+            return
+        pc_ip = local_ip("192.168.1.1")
+        self.run_cmd("setenv ipaddr 192.168.1.1", 0.8, 20)
+        self.run_cmd("setenv netmask 255.255.255.0", 0.8, 20)
+        self.run_cmd("setenv serverip %s" % pc_ip, 0.8, 20)
+        out = self.run_cmd("ping %s" % pc_ip, 2.5, 40)
+        if "is alive" not in out:
+            self.log("[X] ping 不通，检查网线/防火墙\n")
+            self.stat("ping 失败")
+            return
+
+        srv = TftpServer(fwdir, port=69, verbose=False).start()
+        time.sleep(0.4)
+        try:
+            ok = False
+            for blk in (1468, 512):
+                self.run_cmd("setenv tftpblocksize %d" % blk, 0.8, 20)
+                ok = self.tftp_fetch(srv, size, blk)
+                if ok:
+                    break
+            if not ok:
+                self.stat("TFTP 失败")
+                return
+            out = self.run_cmd("crc32 0x%X 0x%X" % (RAM_ADDR, size), 2.5, 60)
+            m = re.search(r"=\s+([0-9a-fA-F]{8})", out)
+            dev_crc = m.group(1).lower() if m else ""
+            self.log("RAM crc32 = %s\n" % (dev_crc or "?"))
+            if dev_crc and dev_crc != pc_crc:
+                self.log("[X] RAM crc32 与 PC 不一致，中止（未写 flash）\n")
+                self.stat("校验失败")
+                return
+            self.stat("擦除原厂固件区 ...")
+            if not self.send_and_until(
+                    "flash erase 0x%X 0x%X" % (addr, aligned),
+                    PROMPT_UBOOT, 1500,
+                    label="flash erase masterbank (%s)" % human(aligned)):
+                self.stat("擦除超时")
+                return
+            self.stat("写入原厂固件 ...")
+            if not self.send_and_until(
+                    "flash write 0x%X 0x%X 0x%X" % (addr, size, RAM_ADDR),
+                    PROMPT_UBOOT, 1800,
+                    label="flash write %d bytes" % size):
+                self.stat("写入超时")
+                return
+            self.stat("回读校验 ...")
+            self.link.clear()
+            self.link.write("flash read 0x%X 0x%X 0x%X\r"
+                            % (addr, size, RBUF_ADDR))
+            if self.link.wait_until([PROMPT_UBOOT], 900) is None:
+                self.log("[!] 回读超时，跳过校验\n")
+            else:
+                out = self.run_cmd("crc32 0x%X 0x%X" % (RBUF_ADDR, size),
+                                   2.5, 60)
+                m = re.search(r"=\s+([0-9a-fA-F]{8})", out)
+                rb = m.group(1).lower() if m else ""
+                self.log("回读 crc32 = %s\n" % (rb or "?"))
+                if rb and rb == pc_crc:
+                    self.log("[OK] 回读 crc32 与 PC 一致，原厂固件还原成功\n")
+                elif rb:
+                    self.log("[X] 回读 crc32 不一致！请重新还原\n")
+                    self.stat("校验失败")
+                    return
+            self.log("\n>>> reset 启动原厂系统\n")
+            self.link.write("reset\r")
+            self.stat("等待原厂启动 ...")
+            if self.link.wait_until([STOCK_MARK, "tc3162ser_startup"], 200):
+                self.log("\n[完成] 原厂固件已还原并启动\n")
+                self.stat("还原完成")
+            else:
+                self.log("[!] 未见原厂启动特征，请观察串口\n")
+                self.stat("启动未确认")
+        finally:
+            srv.stop()
 
     # ---------------- 动作：重启
     def ask_reboot(self):
