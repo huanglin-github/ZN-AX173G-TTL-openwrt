@@ -1,0 +1,16 @@
+#!/bin/sh
+# Kick xHCI PORTSC[3] (the second USB2 port) into RxDetect.
+# Its PHY channel is not brought up by the airoha PHY driver we ported, so the
+# port sits at PLS=Unknown(0) and never detects anything. The vendor firmware
+# does the same poke from userspace (sys memwl 1fab0440 A0).
+# Needs iomem=relaxed on the kernel command line for /dev/mem to work.
+[ -c /dev/mem ] || exit 0
+
+reg=0x1fab0440
+new=0x000002a0
+
+printf '\240\002\000\000' | dd of=/dev/mem bs=4 seek=$((reg / 4)) count=1 conv=notrunc 2>/dev/null
+sleep 1
+cur=$(dd if=/dev/mem bs=4 skip=$((reg / 4)) count=1 2>/dev/null | hexdump -e '"%08x"')
+logger -t usb-port3 "PORTSC[3] after poke = 0x$cur"
+exit 0

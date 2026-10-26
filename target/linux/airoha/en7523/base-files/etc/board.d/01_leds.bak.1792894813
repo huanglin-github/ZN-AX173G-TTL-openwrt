@@ -1,0 +1,28 @@
+#
+# Copyright (C) 2015 OpenWrt.org
+#
+
+. /lib/functions/uci-defaults.sh
+
+board_config_update
+
+board=$(board_name)
+
+case "$board" in
+airoha,en7523-ax3000-router)
+	ucidef_set_led_default "power" "power" "green:power" "1"
+	ucidef_set_led_netdev "internet" "internet" "green:internet" "eth4" "link tx rx"
+	# WiFi LEDs: netdev trigger on the AP interface, link+rx mode.
+	# Solid on when the AP is up, flashes on received traffic.
+	# The GPIO mux is fixed up by hotplug.d/ieee80211/15-wifi-led-mux
+	ucidef_set_led_netdev "wifi2g" "WiFi 2.4GHz" "mt76-phy0" "phy0-ap0" "link rx"
+	ucidef_set_led_netdev "wifi5g" "WiFi 5GHz" "mt76-phy1" "phy1-ap0" "link rx"
+	# WPS LED: does not light on this hardware (GPIO 14 conflict).
+	# Kept in config for completeness but expected to stay off.
+	ucidef_set_led_default "wps" "WPS" "green:wps" "0"
+	;;
+esac
+
+board_config_flush
+
+exit 0

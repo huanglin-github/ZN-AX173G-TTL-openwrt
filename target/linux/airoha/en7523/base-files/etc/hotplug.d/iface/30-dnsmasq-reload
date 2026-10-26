@@ -1,0 +1,8 @@
+#!/bin/sh
+# Reload dnsmasq once lan is up so dhcp-range gets generated.
+[ "$ACTION" = "ifup" ] || exit 0
+[ "$INTERFACE" = "lan" ] || exit 0
+[ -f /tmp/.dnsmasq-reloaded ] && exit 0
+sleep 2
+/etc/init.d/dnsmasq restart 2>/dev/null
+touch /tmp/.dnsmasq-reloaded

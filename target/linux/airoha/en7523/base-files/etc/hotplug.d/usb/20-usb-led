@@ -1,0 +1,17 @@
+#!/bin/sh
+# Bind the panel USB LEDs to the xHCI root-hub ports.
+# /etc/init.d/led runs before the USB host controller is up, so the first
+# attempt fails and the LEDs would stay dark; re-apply on every USB add event.
+
+[ "$ACTION" = "add" ] || exit 0
+
+bind() {
+	led="$1"; port="$2"
+	[ -d "/sys/class/leds/green:$led" ] || return 0
+	echo usbport > "/sys/class/leds/green:$led/trigger" 2>/dev/null
+	echo 1 > "/sys/class/leds/green:$led/ports/$port" 2>/dev/null
+}
+
+bind usb1 usb1-port1
+bind usb2 usb1-port2
+exit 0

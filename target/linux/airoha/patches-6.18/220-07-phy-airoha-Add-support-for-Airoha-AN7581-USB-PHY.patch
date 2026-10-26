@@ -1,0 +1,919 @@
+From fadd22890b239e5a251dbe47367cfbeb1ea105f7 Mon Sep 17 00:00:00 2001
+From: Christian Marangi <ansuelsmth@gmail.com>
+Date: Fri, 7 Feb 2025 13:28:40 +0100
+Subject: [PATCH 07/10] phy: airoha: Add support for Airoha AN7581 USB PHY
+
+Add support for Airoha AN7581 USB PHY driver. AN7581 supports up to 2
+USB port with USB 2.0 mode always supported and USB 3.0 mode available
+only if the Serdes port is correctly configured for USB 3.0.
+
+The second USB port on the SoC can be both used for USB 3.0 operation or
+PCIe. (toggled by the SCU SSR register and configured by the USB PHY
+driver)
+
+If the USB 3.0 mode is not configured, the modes needs to be also
+disabled in the xHCI node or the driver will report unsable clock and
+fail probe.
+
+Also USB 3.0 PHY instance are provided only if the airoha,serdes-port
+and airoha,scu property is defined in DT, if it's not then USB 3.0 PHY
+is assumed not supported.
+
+For USB 2.0 Slew Rate calibration, airoha,usb2-monitor-clk-sel is
+mandatory and is used to select the monitor clock for calibration.
+
+Normally it's 1 for USB port 1 and 2 for USB port 2.
+
+Signed-off-by: Christian Marangi <ansuelsmth@gmail.com>
+---
+ MAINTAINERS                         |   1 +
+ drivers/phy/airoha/Kconfig          |  10 +
+ drivers/phy/airoha/Makefile         |   1 +
+ drivers/phy/airoha/phy-airoha-usb.c | 597 ++++++++++++++++++++++++++++
+ 4 files changed, 609 insertions(+)
+ create mode 100644 drivers/phy/airoha/phy-airoha-usb.c
+
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -776,6 +776,7 @@ M:	Christian Marangi <ansuelsmth@gmail.c
+ L:	linux-arm-kernel@lists.infradead.org (moderated for non-subscribers)
+ S:	Maintained
+ F:	Documentation/devicetree/bindings/phy/airoha,an7581-usb-phy.yaml
++F:	drivers/phy/airoha/phy-airoha-usb.c
+ F:	include/dt-bindings/phy/airoha,an7581-usb-phy.h
+ 
+ AIRSPY MEDIA DRIVER
+--- a/drivers/phy/airoha/Kconfig
++++ b/drivers/phy/airoha/Kconfig
+@@ -11,3 +11,13 @@ config PHY_AIROHA_PCIE
+ 	  Say Y here to add support for Airoha PCIe PHY driver.
+ 	  This driver create the basic PHY instance and provides initialize
+ 	  callback for PCIe GEN3 port.
++
++config PHY_AIROHA_USB
++	tristate "Airoha USB PHY Driver"
++	depends on ARCH_AIROHA || COMPILE_TEST
++	depends on OF
++	select GENERIC_PHY
++	help
++	  Say 'Y' here to add support for Airoha USB PHY driver.
++	  This driver create the basic PHY instance and provides initialize
++	  callback for USB port.
+--- a/drivers/phy/airoha/Makefile
++++ b/drivers/phy/airoha/Makefile
+@@ -1,3 +1,4 @@
+ # SPDX-License-Identifier: GPL-2.0
+ 
+ obj-$(CONFIG_PHY_AIROHA_PCIE)		+= phy-airoha-pcie.o
++obj-$(CONFIG_PHY_AIROHA_USB)		+= phy-airoha-usb.o
+--- /dev/null
++++ b/drivers/phy/airoha/phy-airoha-usb.c
+@@ -0,0 +1,848 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Author: Christian Marangi <ansuelsmth@gmail.com>
++ */
++
++#include <dt-bindings/phy/phy.h>
++#include <dt-bindings/soc/airoha,scu-ssr.h>
++#include <linux/bitfield.h>
++#include <linux/io.h>
++#include <linux/math.h>
++#include <linux/module.h>
++#include <linux/mfd/syscon.h>
++#include <linux/phy/phy.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++
++/* SCU */
++#define AIROHA_SCU_SSTR				0x9c
++#define   AIROHA_SCU_SSTR_USB_PCIE_SEL		BIT(3)
++#define   AIROHA_SCU_SSTR_USB_PCIE_SEL_PCIE	FIELD_PREP_CONST(AIROHA_SCU_SSTR_USB_PCIE_SEL, 0x0)
++#define   AIROHA_SCU_SSTR_USB_PCIE_SEL_USB	FIELD_PREP_CONST(AIROHA_SCU_SSTR_USB_PCIE_SEL, 0x1)
++
++/* U2PHY */
++#define AIROHA_USB_PHY_FMCR0			0x100
++#define   AIROHA_USB_PHY_MONCLK_SEL		GENMASK(27, 26)
++#define   AIROHA_USB_PHY_MONCLK_SEL0		FIELD_PREP_CONST(AIROHA_USB_PHY_MONCLK_SEL, 0x0)
++#define   AIROHA_USB_PHY_MONCLK_SEL1		FIELD_PREP_CONST(AIROHA_USB_PHY_MONCLK_SEL, 0x1)
++#define   AIROHA_USB_PHY_MONCLK_SEL2		FIELD_PREP_CONST(AIROHA_USB_PHY_MONCLK_SEL, 0x2)
++#define   AIROHA_USB_PHY_MONCLK_SEL3		FIELD_PREP_CONST(AIROHA_USB_PHY_MONCLK_SEL, 0x3)
++#define   AIROHA_USB_PHY_FREQDET_EN		BIT(24)
++#define   AIROHA_USB_PHY_CYCLECNT		GENMASK(23, 0)
++#define AIROHA_USB_PHY_FMMONR0			0x10c
++#define   AIROHA_USB_PHY_USB_FM_OUT		GENMASK(31, 0)
++#define AIROHA_USB_PHY_FMMONR1			0x110
++#define   AIROHA_USB_PHY_FRCK_EN		BIT(8)
++
++#define AIROHA_USB_PHY_USBPHYACR4		0x310
++#define   AIROHA_USB_PHY_USB20_FS_CR		GENMASK(10, 8)
++#define   AIROHA_USB_PHY_USB20_FS_CR_MAX	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_FS_CR, 0x0)
++#define   AIROHA_USB_PHY_USB20_FS_CR_NORMAL	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_FS_CR, 0x2)
++#define   AIROHA_USB_PHY_USB20_FS_CR_SMALLER	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_FS_CR, 0x4)
++#define   AIROHA_USB_PHY_USB20_FS_CR_MIN	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_FS_CR, 0x6)
++#define   AIROHA_USB_PHY_USB20_FS_SR		GENMASK(2, 0)
++#define   AIROHA_USB_PHY_USB20_FS_SR_MAX	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_FS_SR, 0x0)
++#define   AIROHA_USB_PHY_USB20_FS_SR_NORMAL	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_FS_SR, 0x2)
++#define   AIROHA_USB_PHY_USB20_FS_SR_SMALLER	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_FS_SR, 0x4)
++#define   AIROHA_USB_PHY_USB20_FS_SR_MIN	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_FS_SR, 0x6)
++#define AIROHA_USB_PHY_USBPHYACR5		0x314
++#define   AIROHA_USB_PHY_USB20_HSTX_SRCAL_EN	BIT(15)
++#define   AIROHA_USB_PHY_USB20_HSTX_SRCTRL	GENMASK(14, 12)
++#define AIROHA_USB_PHY_USBPHYACR6		0x318
++#define   AIROHA_USB_PHY_USB20_BC11_SW_EN	BIT(23)
++#define   AIROHA_USB_PHY_USB20_DISCTH		GENMASK(7, 4)
++#define   AIROHA_USB_PHY_USB20_DISCTH_400	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0x0)
++#define   AIROHA_USB_PHY_USB20_DISCTH_420	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0x1)
++#define   AIROHA_USB_PHY_USB20_DISCTH_440	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0x2)
++#define   AIROHA_USB_PHY_USB20_DISCTH_460	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0x3)
++#define   AIROHA_USB_PHY_USB20_DISCTH_480	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0x4)
++#define   AIROHA_USB_PHY_USB20_DISCTH_500	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0x5)
++#define   AIROHA_USB_PHY_USB20_DISCTH_520	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0x6)
++#define   AIROHA_USB_PHY_USB20_DISCTH_540	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0x7)
++#define   AIROHA_USB_PHY_USB20_DISCTH_560	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0x8)
++#define   AIROHA_USB_PHY_USB20_DISCTH_580	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0x9)
++#define   AIROHA_USB_PHY_USB20_DISCTH_600	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0xa)
++#define   AIROHA_USB_PHY_USB20_DISCTH_620	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0xb)
++#define   AIROHA_USB_PHY_USB20_DISCTH_640	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0xc)
++#define   AIROHA_USB_PHY_USB20_DISCTH_660	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0xd)
++#define   AIROHA_USB_PHY_USB20_DISCTH_680	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0xe)
++#define   AIROHA_USB_PHY_USB20_DISCTH_700	FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_DISCTH, 0xf)
++#define   AIROHA_USB_PHY_USB20_SQTH		GENMASK(3, 0)
++#define   AIROHA_USB_PHY_USB20_SQTH_85		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0x0)
++#define   AIROHA_USB_PHY_USB20_SQTH_90		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0x1)
++#define   AIROHA_USB_PHY_USB20_SQTH_95		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0x2)
++#define   AIROHA_USB_PHY_USB20_SQTH_100		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0x3)
++#define   AIROHA_USB_PHY_USB20_SQTH_105		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0x4)
++#define   AIROHA_USB_PHY_USB20_SQTH_110		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0x5)
++#define   AIROHA_USB_PHY_USB20_SQTH_115		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0x6)
++#define   AIROHA_USB_PHY_USB20_SQTH_120		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0x7)
++#define   AIROHA_USB_PHY_USB20_SQTH_125		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0x8)
++#define   AIROHA_USB_PHY_USB20_SQTH_130		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0x9)
++#define   AIROHA_USB_PHY_USB20_SQTH_135		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0xa)
++#define   AIROHA_USB_PHY_USB20_SQTH_140		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0xb)
++#define   AIROHA_USB_PHY_USB20_SQTH_145		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0xc)
++#define   AIROHA_USB_PHY_USB20_SQTH_150		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0xd)
++#define   AIROHA_USB_PHY_USB20_SQTH_155		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0xe)
++#define   AIROHA_USB_PHY_USB20_SQTH_160		FIELD_PREP_CONST(AIROHA_USB_PHY_USB20_SQTH, 0xf)
++
++#define AIROHA_USB_PHY_U2PHYDTM1		0x36c
++#define   AIROHA_USB_PHY_FORCE_IDDIG		BIT(9)
++#define   AIROHA_USB_PHY_IDDIG			BIT(1)
++
++#define AIROHA_USB_PHY_GPIO_CTLD		0x80c
++#define   AIROHA_USB_PHY_C60802_GPIO_CTLD	GENMASK(31, 0)
++#define     AIROHA_USB_PHY_SSUSB_IP_SW_RST	BIT(31)
++#define     AIROHA_USB_PHY_MCU_BUS_CK_GATE_EN	BIT(30)
++#define     AIROHA_USB_PHY_FORCE_SSUSB_IP_SW_RST BIT(29)
++#define     AIROHA_USB_PHY_SSUSB_SW_RST		BIT(28)
++
++#define AIROHA_USB_PHY_U3_PHYA_REG0		0xb00
++#define   AIROHA_USB_PHY_SSUSB_BG_DIV		GENMASK(29, 28)
++#define   AIROHA_USB_PHY_SSUSB_BG_DIV_2		FIELD_PREP_CONST(AIROHA_USB_PHY_SSUSB_BG_DIV, 0x0)
++#define   AIROHA_USB_PHY_SSUSB_BG_DIV_4		FIELD_PREP_CONST(AIROHA_USB_PHY_SSUSB_BG_DIV, 0x1)
++#define   AIROHA_USB_PHY_SSUSB_BG_DIV_8		FIELD_PREP_CONST(AIROHA_USB_PHY_SSUSB_BG_DIV, 0x2)
++#define   AIROHA_USB_PHY_SSUSB_BG_DIV_16	FIELD_PREP_CONST(AIROHA_USB_PHY_SSUSB_BG_DIV, 0x3)
++#define AIROHA_USB_PHY_U3_PHYA_REG1		0xb04
++#define   AIROHA_USB_PHY_SSUSB_XTAL_TOP_RESERVE	GENMASK(25, 10)
++#define AIROHA_USB_PHY_U3_PHYA_REG6		0xb18
++#define   AIROHA_USB_PHY_SSUSB_CDR_RESERVE	GENMASK(31, 24)
++#define AIROHA_USB_PHY_U3_PHYA_REG8		0xb20
++#define   AIROHA_USB_PHY_SSUSB_CDR_RST_DLY	GENMASK(7, 6)
++#define   AIROHA_USB_PHY_SSUSB_CDR_RST_DLY_32	FIELD_PREP_CONST(AIROHA_USB_PHY_SSUSB_CDR_RST_DLY, 0x0)
++#define   AIROHA_USB_PHY_SSUSB_CDR_RST_DLY_64	FIELD_PREP_CONST(AIROHA_USB_PHY_SSUSB_CDR_RST_DLY, 0x1)
++#define   AIROHA_USB_PHY_SSUSB_CDR_RST_DLY_128	FIELD_PREP_CONST(AIROHA_USB_PHY_SSUSB_CDR_RST_DLY, 0x2)
++#define   AIROHA_USB_PHY_SSUSB_CDR_RST_DLY_216	FIELD_PREP_CONST(AIROHA_USB_PHY_SSUSB_CDR_RST_DLY, 0x3)
++
++#define AIROHA_USB_PHY_U3_PHYA_DA_REG19		0xc38
++#define   AIROHA_USB_PHY_SSUSB_PLL_SSC_DELTA1_U3 GENMASK(15, 0)
++
++#define AIROHA_USB_PHY_U2_FM_DET_CYCLE_CNT	1024
++#define AIROHA_USB_PHY_REF_CK			20
++#define AIROHA_USB_PHY_U2_SR_COEF		28
++#define AIROHA_USB_PHY_U2_SR_COEF_DIVISOR	1000
++
++#define AIROHA_USB_PHY_DEFAULT_SR_CALIBRATION	0x5
++#define AIROHA_USB_PHY_FREQDET_SLEEP		1000 /* 1ms */
++#define AIROHA_USB_PHY_FREQDET_TIMEOUT		(AIROHA_USB_PHY_FREQDET_SLEEP * 10)
++
++/*
++ * IPPC (USB IP power control) block, mapped as the optional second reg.
++ * On EN7523 the bootloader leaves the xHCI host IP powered down: with
++ * IP_HOST_PDN set every xHCI capability register reads back as 0, so the
++ * host controller can not be probed until this bit is cleared.
++ */
++#define AIROHA_USB_IPPC_IP_PW_CTR0		0x00
++#define   AIROHA_USB_IPPC_IP_SW_RST		BIT(0)
++#define AIROHA_USB_IPPC_IP_PW_CTR1		0x04
++#define   AIROHA_USB_IPPC_IP_HOST_PDN		BIT(0)
++
++/*
++ * Per-port power/IP control. Each of the 8 entries (u3/u2, interleaved)
++ * carries a power-down and a disable request in the low bits; they are
++ * set after reset and have to be released before the xHCI core leaves
++ * the "controller not ready" state.
++ */
++#define AIROHA_USB_IPPC_PORT_CTRL0		0x4c
++#define AIROHA_USB_IPPC_PORT_CTRL_NUM		8
++#define   AIROHA_USB_IPPC_PORT_PDN		BIT(0)
++#define   AIROHA_USB_IPPC_PORT_DIS		BIT(1)
++
++/* Reference/PLL control words that also hold the core in "not ready" */
++#define AIROHA_USB_IPPC_PLL_CTRL0		0x2c
++#define AIROHA_USB_IPPC_PLL_CTRL1		0x30
++/* The low bits of PLL_CTRL1 are also the xHCI port-enable mask. */
++#define   AIROHA_USB_IPPC_PLL_CTRL1_PORT_EN	0x0000020f
++#define AIROHA_USB_IPPC_PLL_CTRL2		0x38
++
++struct airoha_usb_phy_instance {
++	struct phy *phy;
++	u32 type;
++};
++
++enum airoha_usb_phy_instance_type {
++	AIROHA_PHY_USB2,
++	AIROHA_PHY_USB3,
++
++	AIROHA_PHY_USB_MAX,
++};
++
++struct airoha_usb_phy_priv {
++	struct device *dev;
++	struct regmap *regmap;
++	struct regmap *scu;
++	void __iomem *ippc;
++
++	unsigned int monclk_sel;
++	unsigned int serdes_port;
++
++	struct airoha_usb_phy_instance *phys[AIROHA_PHY_USB_MAX];
++};
++
++/*
++ * EN7523 has two USB2 ports; the second port's U2 PHY register bank starts
++ * at offset 0x1000 (the vendor DTS gives usb_phy@1fad0000 a 0x1fff window).
++ * mainline this driver comes from (AN7581) only has one U2 port, so every
++ * U2 access must be issued once per channel.
++ */
++#define AIROHA_USB_PHY_U2_CH0			0x0000
++#define AIROHA_USB_PHY_U2_CH1			0x1000
++#define AIROHA_USB_PHY_U2_CH_NUM		2
++
++static const unsigned int airoha_usb_phy_u2_ch[AIROHA_USB_PHY_U2_CH_NUM] = {
++	AIROHA_USB_PHY_U2_CH0, AIROHA_USB_PHY_U2_CH1,
++};
++
++/* GPIO0 controller (airoha,en7523-gpio) register map, from gpio-en7523.c. */
++#define AIROHA_GPIO_DATA			0x04
++#define AIROHA_GPIO_OUTPUT			0x14
++#define AIROHA_GPIO_DIR_LO			0x00
++#define AIROHA_GPIO_BASE			0x1fbf0200
++#define AIROHA_GPIO_SIZE			0x40
++/* The board switches the two USB2 VBUS rails with GPIO4/GPIO5. */
++#define AIROHA_GPIO_USB_VBUS_LO			4
++#define AIROHA_GPIO_USB_VBUS_HI			5
++
++static void airoha_usb_phy_vbus_enable(void)
++{
++	void __iomem *g = ioremap(AIROHA_GPIO_BASE, AIROHA_GPIO_SIZE);
++	u32 mask = BIT(AIROHA_GPIO_USB_VBUS_LO) |
++		   BIT(AIROHA_GPIO_USB_VBUS_HI);
++	u32 dir, dat, out;
++
++	if (!g)
++		return;
++
++	dir = readl(g + AIROHA_GPIO_DIR_LO);
++	dat = readl(g + AIROHA_GPIO_DATA);
++	out = readl(g + AIROHA_GPIO_OUTPUT);
++	/* airoha_dir_set(gpio, 1, out): 2-bit dir field + output-enable + data */
++	dir |= BIT(AIROHA_GPIO_USB_VBUS_LO * 2) |
++	       BIT(AIROHA_GPIO_USB_VBUS_HI * 2);
++	dat |= mask;
++	out |= mask;
++	writel(dir, g + AIROHA_GPIO_DIR_LO);
++	writel(dat, g + AIROHA_GPIO_DATA);
++	writel(out, g + AIROHA_GPIO_OUTPUT);
++	pr_info("usb2pwr: VBUS GPIO4/5 driven high (dir=%08x dat=%08x out=%08x)\n",
++		dir, dat, out);
++	iounmap(g);
++}
++
++static void airoha_usb_phy_u2_slew_rate_calibration(struct airoha_usb_phy_priv *priv,
++						    unsigned int off)
++{
++	u32 fm_out;
++	u32 srctrl;
++
++	/* Enable HS TX SR calibration */
++	regmap_set_bits(priv->regmap, AIROHA_USB_PHY_USBPHYACR5 + off,
++			AIROHA_USB_PHY_USB20_HSTX_SRCAL_EN);
++
++	usleep_range(1000, 1500);
++
++	/* Enable Free run clock */
++	regmap_set_bits(priv->regmap, AIROHA_USB_PHY_FMMONR1 + off,
++			AIROHA_USB_PHY_FRCK_EN);
++
++	/* Select Monitor Clock */
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_FMCR0 + off,
++			   AIROHA_USB_PHY_MONCLK_SEL,
++			   FIELD_PREP(AIROHA_USB_PHY_MONCLK_SEL,
++				      priv->monclk_sel));
++
++	/* Set cyclecnt */
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_FMCR0 + off,
++			   AIROHA_USB_PHY_CYCLECNT,
++			   FIELD_PREP(AIROHA_USB_PHY_CYCLECNT,
++				      AIROHA_USB_PHY_U2_FM_DET_CYCLE_CNT));
++
++	/* Enable Frequency meter */
++	regmap_set_bits(priv->regmap, AIROHA_USB_PHY_FMCR0 + off,
++			AIROHA_USB_PHY_FREQDET_EN);
++
++	/* Timeout can happen and we will apply workaround at the end */
++	regmap_read_poll_timeout(priv->regmap, AIROHA_USB_PHY_FMMONR0 + off,
++				 fm_out,
++				 fm_out, AIROHA_USB_PHY_FREQDET_SLEEP,
++				 AIROHA_USB_PHY_FREQDET_TIMEOUT);
++
++	/* Disable Frequency meter */
++	regmap_clear_bits(priv->regmap, AIROHA_USB_PHY_FMCR0 + off,
++			  AIROHA_USB_PHY_FREQDET_EN);
++
++	/* Disable Free run clock */
++	regmap_clear_bits(priv->regmap, AIROHA_USB_PHY_FMMONR1 + off,
++			  AIROHA_USB_PHY_FRCK_EN);
++
++	/* Disable HS TX SR calibration */
++	regmap_clear_bits(priv->regmap, AIROHA_USB_PHY_USBPHYACR5 + off,
++			  AIROHA_USB_PHY_USB20_HSTX_SRCAL_EN);
++
++	usleep_range(1000, 1500);
++
++	/* Frequency was not detected, use default SR calibration value */
++	if (!fm_out) {
++		srctrl = AIROHA_USB_PHY_DEFAULT_SR_CALIBRATION;
++		dev_err(priv->dev, "Frequency not detected, using default SR calibration.\n");
++	} else {
++		/* (1024 / FM_OUT) * REF_CK * U2_SR_COEF (round to the nearest digits) */
++		srctrl = AIROHA_USB_PHY_REF_CK * AIROHA_USB_PHY_U2_SR_COEF;
++		srctrl = (srctrl * AIROHA_USB_PHY_U2_FM_DET_CYCLE_CNT) / fm_out;
++		srctrl = DIV_ROUND_CLOSEST(srctrl, AIROHA_USB_PHY_U2_SR_COEF_DIVISOR);
++		dev_dbg(priv->dev, "SR calibration applied: %x\n", srctrl);
++	}
++
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_USBPHYACR5 + off,
++			   AIROHA_USB_PHY_USB20_HSTX_SRCTRL,
++			   FIELD_PREP(AIROHA_USB_PHY_USB20_HSTX_SRCTRL, srctrl));
++}
++
++/*
++ * The last step of the vendor init sequence: once the xHCI driver is up,
++ * kick the ports into RxDetect, because a port left in Disabled never
++ * re-scans on its own and would stay deaf even with VBUS present.
++ * PORTSC[2] (0x430) is the working USB1 port -- leave it alone.
++ */
++static void airoha_usb_port3_poke(struct work_struct *work)
++{
++	void __iomem *xhci;
++	u32 p1, p2, p3;
++	int i;
++
++	xhci = ioremap(0x1fab0000, 0x1000);
++	if (!xhci)
++		return;
++
++	for (i = 0; i < 2; i++) {
++		writel(0xa0, xhci + 0x420);
++		writel(0xa0, xhci + 0x440);
++		msleep(1500);
++		p1 = readl(xhci + 0x420);
++		p2 = readl(xhci + 0x430);
++		p3 = readl(xhci + 0x440);
++		pr_info("usb2pwr: try%d A0 P1=%08x P2=%08x P3=%08x\n",
++			i, p1, p2, p3);
++	}
++
++	/* LWS-qualified retry for any port still in Disabled. */
++	writel(0x2a0, xhci + 0x420);
++	writel(0x2a0, xhci + 0x440);
++	msleep(1500);
++	pr_info("usb2pwr: LWS retry P1=%08x P3=%08x\n",
++		readl(xhci + 0x420), readl(xhci + 0x440));
++
++	iounmap(xhci);
++}
++
++static DECLARE_DELAYED_WORK(airoha_usb_port3_work, airoha_usb_port3_poke);
++
++static void airoha_usb_phy_u2_init(struct airoha_usb_phy_priv *priv,
++				   unsigned int off)
++{
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_USBPHYACR4 + off,
++			   AIROHA_USB_PHY_USB20_FS_CR,
++			   AIROHA_USB_PHY_USB20_FS_CR_MIN);
++
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_USBPHYACR4 + off,
++			   AIROHA_USB_PHY_USB20_FS_SR,
++			   AIROHA_USB_PHY_USB20_FS_SR_NORMAL);
++
++	/* FIXME: evaluate if needed */
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_USBPHYACR6 + off,
++			   AIROHA_USB_PHY_USB20_SQTH,
++			   AIROHA_USB_PHY_USB20_SQTH_130);
++
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_USBPHYACR6 + off,
++			   AIROHA_USB_PHY_USB20_DISCTH,
++			   AIROHA_USB_PHY_USB20_DISCTH_600);
++
++	/* Enable the USB port and then disable after calibration */
++	regmap_clear_bits(priv->regmap, AIROHA_USB_PHY_USBPHYACR6 + off,
++			  AIROHA_USB_PHY_USB20_BC11_SW_EN);
++
++	airoha_usb_phy_u2_slew_rate_calibration(priv, off);
++
++	regmap_set_bits(priv->regmap, AIROHA_USB_PHY_USBPHYACR6 + off,
++			AIROHA_USB_PHY_USB20_BC11_SW_EN);
++
++	usleep_range(1000, 1500);
++}
++
++/*
++ * USB 3.0 mode can only work if USB serdes is correctly set.
++ * This is validated in xLate function.
++ */
++static void airoha_usb_phy_u3_init(struct airoha_usb_phy_priv *priv)
++{
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_U3_PHYA_REG8,
++			   AIROHA_USB_PHY_SSUSB_CDR_RST_DLY,
++			   AIROHA_USB_PHY_SSUSB_CDR_RST_DLY_32);
++
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_U3_PHYA_REG6,
++			   AIROHA_USB_PHY_SSUSB_CDR_RESERVE,
++			   FIELD_PREP(AIROHA_USB_PHY_SSUSB_CDR_RESERVE, 0xe));
++
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_U3_PHYA_REG0,
++			   AIROHA_USB_PHY_SSUSB_BG_DIV,
++			   AIROHA_USB_PHY_SSUSB_BG_DIV_4);
++
++	regmap_set_bits(priv->regmap, AIROHA_USB_PHY_U3_PHYA_REG1,
++			FIELD_PREP(AIROHA_USB_PHY_SSUSB_XTAL_TOP_RESERVE, 0x600));
++
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_U3_PHYA_DA_REG19,
++			   AIROHA_USB_PHY_SSUSB_PLL_SSC_DELTA1_U3,
++			   FIELD_PREP(AIROHA_USB_PHY_SSUSB_PLL_SSC_DELTA1_U3, 0x43));
++}
++
++static int airoha_usb_phy_init(struct phy *phy)
++{
++	struct airoha_usb_phy_instance *instance = phy_get_drvdata(phy);
++	struct airoha_usb_phy_priv *priv = dev_get_drvdata(phy->dev.parent);
++
++	switch (instance->type) {
++	case PHY_TYPE_USB2: {
++		unsigned int ci;
++
++		for (ci = 0; ci < AIROHA_USB_PHY_U2_CH_NUM; ci++)
++			airoha_usb_phy_u2_init(priv, airoha_usb_phy_u2_ch[ci]);
++		break;
++	}
++	case PHY_TYPE_USB3:
++		if (phy_get_mode(phy) == PHY_MODE_PCIE)
++			return 0;
++
++		airoha_usb_phy_u3_init(priv);
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static int airoha_usb_phy_u2_power_on(struct airoha_usb_phy_priv *priv)
++{
++	unsigned int i;
++
++	for (i = 0; i < AIROHA_USB_PHY_U2_CH_NUM; i++)
++		regmap_clear_bits(priv->regmap,
++				  AIROHA_USB_PHY_USBPHYACR6 +
++				  airoha_usb_phy_u2_ch[i],
++				  AIROHA_USB_PHY_USB20_BC11_SW_EN);
++
++	usleep_range(1000, 1500);
++
++	return 0;
++}
++
++static int airoha_usb_phy_u3_power_on(struct airoha_usb_phy_priv *priv)
++{
++	regmap_clear_bits(priv->regmap, AIROHA_USB_PHY_GPIO_CTLD,
++			  AIROHA_USB_PHY_SSUSB_IP_SW_RST |
++			  AIROHA_USB_PHY_MCU_BUS_CK_GATE_EN |
++			  AIROHA_USB_PHY_FORCE_SSUSB_IP_SW_RST |
++			  AIROHA_USB_PHY_SSUSB_SW_RST);
++
++	usleep_range(1000, 1500);
++
++	return 0;
++}
++
++static int airoha_usb_phy_power_on(struct phy *phy)
++{
++	struct airoha_usb_phy_instance *instance = phy_get_drvdata(phy);
++	struct airoha_usb_phy_priv *priv = dev_get_drvdata(phy->dev.parent);
++
++	switch (instance->type) {
++	case PHY_TYPE_USB2:
++		airoha_usb_phy_u2_power_on(priv);
++		break;
++	case PHY_TYPE_USB3:
++		if (phy_get_mode(phy) == PHY_MODE_PCIE)
++			return 0;
++
++		airoha_usb_phy_u3_power_on(priv);
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static int airoha_usb_phy_u2_power_off(struct airoha_usb_phy_priv *priv)
++{
++	unsigned int i;
++
++	for (i = 0; i < AIROHA_USB_PHY_U2_CH_NUM; i++)
++		regmap_set_bits(priv->regmap,
++				AIROHA_USB_PHY_USBPHYACR6 +
++				airoha_usb_phy_u2_ch[i],
++				AIROHA_USB_PHY_USB20_BC11_SW_EN);
++
++	usleep_range(1000, 1500);
++
++	return 0;
++}
++
++static int airoha_usb_phy_u3_power_off(struct airoha_usb_phy_priv *priv)
++{
++	regmap_set_bits(priv->regmap, AIROHA_USB_PHY_GPIO_CTLD,
++			AIROHA_USB_PHY_SSUSB_IP_SW_RST |
++			AIROHA_USB_PHY_FORCE_SSUSB_IP_SW_RST);
++
++	usleep_range(1000, 1500);
++
++	return 0;
++}
++
++static int airoha_usb_phy_power_off(struct phy *phy)
++{
++	struct airoha_usb_phy_instance *instance = phy_get_drvdata(phy);
++	struct airoha_usb_phy_priv *priv = dev_get_drvdata(phy->dev.parent);
++
++	switch (instance->type) {
++	case PHY_TYPE_USB2:
++		airoha_usb_phy_u2_power_off(priv);
++		break;
++	case PHY_TYPE_USB3:
++		if (phy_get_mode(phy) == PHY_MODE_PCIE)
++			return 0;
++
++		airoha_usb_phy_u3_power_off(priv);
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static int airoha_usb_phy_u2_set_mode(struct airoha_usb_phy_priv *priv,
++				      enum phy_mode mode, unsigned int off)
++{
++	u32 val;
++
++	/*
++	 * For Device and Host mode, enable force IDDIG.
++	 * For Device set IDDIG, for Host clear IDDIG.
++	 * For OTG disable force and clear IDDIG bit while at it.
++	 */
++	switch (mode) {
++	case PHY_MODE_USB_DEVICE:
++		val = AIROHA_USB_PHY_IDDIG;
++		break;
++	case PHY_MODE_USB_HOST:
++		val = AIROHA_USB_PHY_FORCE_IDDIG |
++		      AIROHA_USB_PHY_FORCE_IDDIG;
++		break;
++	case PHY_MODE_USB_OTG:
++		val = 0;
++		break;
++	default:
++		return 0;
++	}
++
++	regmap_update_bits(priv->regmap, AIROHA_USB_PHY_U2PHYDTM1 + off,
++			   AIROHA_USB_PHY_FORCE_IDDIG |
++			   AIROHA_USB_PHY_IDDIG, val);
++
++	return 0;
++}
++
++/* EN7523: host mode must be forced on both U2 channels. */
++static int airoha_usb_phy_u2_set_mode_all(struct airoha_usb_phy_priv *priv,
++					  enum phy_mode mode)
++{
++	unsigned int i;
++	int ret;
++
++	for (i = 0; i < AIROHA_USB_PHY_U2_CH_NUM; i++) {
++		ret = airoha_usb_phy_u2_set_mode(priv, mode,
++						 airoha_usb_phy_u2_ch[i]);
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static int airoha_usb_phy_u3_set_mode(struct airoha_usb_phy_priv *priv,
++				      enum phy_mode mode)
++{
++	u32 sel;
++
++	/* Only USB2 supports PCIe mode */
++	if (mode == PHY_MODE_PCIE &&
++	    priv->serdes_port != AIROHA_SCU_SERDES_USB2)
++		return -EINVAL;
++
++	if (mode == PHY_MODE_PCIE)
++		sel = AIROHA_SCU_SSTR_USB_PCIE_SEL_PCIE;
++	else
++		sel = AIROHA_SCU_SSTR_USB_PCIE_SEL_USB;
++
++	regmap_update_bits(priv->scu, AIROHA_SCU_SSTR,
++			   AIROHA_SCU_SSTR_USB_PCIE_SEL, sel);
++
++	return 0;
++}
++
++static int airoha_usb_phy_set_mode(struct phy *phy, enum phy_mode mode, int submode)
++{
++	struct airoha_usb_phy_instance *instance = phy_get_drvdata(phy);
++	struct airoha_usb_phy_priv *priv = dev_get_drvdata(phy->dev.parent);
++
++	switch (instance->type) {
++	case PHY_TYPE_USB2:
++		return airoha_usb_phy_u2_set_mode_all(priv, mode);
++	case PHY_TYPE_USB3:
++		return airoha_usb_phy_u3_set_mode(priv, mode);
++	default:
++		return 0;
++	}
++}
++
++static struct phy *airoha_usb_phy_xlate(struct device *dev,
++					const struct of_phandle_args *args)
++{
++	struct airoha_usb_phy_priv *priv = dev_get_drvdata(dev);
++	struct airoha_usb_phy_instance *instance = NULL;
++	unsigned int index, phy_type;
++
++	if (args->args_count != 1) {
++		dev_err(dev, "invalid number of cells in 'phy' property\n");
++		return ERR_PTR(-EINVAL);
++	}
++
++	phy_type = args->args[0];
++	if (!(phy_type == PHY_TYPE_USB2 || phy_type == PHY_TYPE_USB3)) {
++		dev_err(dev, "unsupported device type: %d\n", phy_type);
++		return ERR_PTR(-EINVAL);
++	}
++
++	for (index = 0; index < AIROHA_PHY_USB_MAX; index++)
++		if (priv->phys[index] &&
++		    phy_type == priv->phys[index]->type) {
++			instance = priv->phys[index];
++			break;
++		}
++
++	if (!instance) {
++		dev_err(dev, "failed to find appropriate phy\n");
++		return ERR_PTR(-EINVAL);
++	}
++
++	return instance->phy;
++}
++
++static const struct phy_ops airoha_phy = {
++	.init		= airoha_usb_phy_init,
++	.power_on	= airoha_usb_phy_power_on,
++	.power_off	= airoha_usb_phy_power_off,
++	.set_mode	= airoha_usb_phy_set_mode,
++	.owner		= THIS_MODULE,
++};
++
++static const struct regmap_config airoha_usb_phy_regmap_config = {
++	.reg_bits = 32,
++	.val_bits = 32,
++	.reg_stride = 4,
++};
++
++static int airoha_usb_phy_probe(struct platform_device *pdev)
++{
++	struct phy_provider *phy_provider;
++	struct airoha_usb_phy_priv *priv;
++	struct device *dev = &pdev->dev;
++	struct resource *res;
++	unsigned int index;
++
++	/* Bring the USB VBUS power rails (GPIO4/5) up as early as possible. */
++	airoha_usb_phy_vbus_enable();
++	void *base;
++	int ret;
++
++	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
++	if (!priv)
++		return -ENOMEM;
++
++	priv->dev = dev;
++
++	ret = of_property_read_u32(dev->of_node, "airoha,usb2-monitor-clk-sel",
++				   &priv->monclk_sel);
++	if (ret)
++		return dev_err_probe(dev, ret, "Monitor clock selection is mandatory for USB PHY calibration.\n");
++
++	if (priv->monclk_sel > 3)
++		return dev_err_probe(dev, -EINVAL, "only 4 Monitor clock are selectable on the SoC.\n");
++
++	base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(base))
++		return PTR_ERR(base);
++
++	priv->regmap = devm_regmap_init_mmio(dev, base, &airoha_usb_phy_regmap_config);
++	if (IS_ERR(priv->regmap))
++		return PTR_ERR(priv->regmap);
++
++	platform_set_drvdata(pdev, priv);
++
++	/*
++	 * Optional IPPC block: reset and power on the xHCI host IP.
++	 *
++	 * The EN7523 bootloader leaves both IP_SW_RST (ip_pw_ctr0 bit0) and
++	 * IP_HOST_PDN (ip_pw_ctr1 bit0) set. With IP_HOST_PDN set the whole
++	 * xHCI register space reads back as zero; with IP_SW_RST still set
++	 * the capability registers become readable but the operational
++	 * registers stay dead, which makes xhci_halt() time out (-110).
++	 * So the IP has to be taken out of soft reset *and* powered on.
++	 */
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
++	if (res) {
++		u32 val;
++
++		priv->ippc = devm_ioremap_resource(dev, res);
++		if (IS_ERR(priv->ippc))
++			return PTR_ERR(priv->ippc);
++
++		/* Assert then release the whole-IP soft reset */
++		val = readl(priv->ippc + AIROHA_USB_IPPC_IP_PW_CTR0);
++		writel(val | AIROHA_USB_IPPC_IP_SW_RST,
++		       priv->ippc + AIROHA_USB_IPPC_IP_PW_CTR0);
++		udelay(2);
++		writel(val & ~AIROHA_USB_IPPC_IP_SW_RST,
++		       priv->ippc + AIROHA_USB_IPPC_IP_PW_CTR0);
++		udelay(2);
++
++		/* Power on the host IP */
++		val = readl(priv->ippc + AIROHA_USB_IPPC_IP_PW_CTR1);
++		writel(val & ~AIROHA_USB_IPPC_IP_HOST_PDN,
++		       priv->ippc + AIROHA_USB_IPPC_IP_PW_CTR1);
++		usleep_range(1000, 1500);
++
++		/*
++		 * Clear the reference/PLL control words and release the
++		 * per-port power-down/disable requests. Both are required:
++		 * with either of them left alone the xHCI core keeps
++		 * USBSTS.CNR set ("controller not ready") forever, and
++		 * xhci_reset() then fails with -ETIMEDOUT, which aborts the
++		 * whole host controller probe.
++		 */
++		writel(0, priv->ippc + AIROHA_USB_IPPC_PLL_CTRL0);
++		writel(0, priv->ippc + AIROHA_USB_IPPC_PLL_CTRL1);
++		writel(0, priv->ippc + AIROHA_USB_IPPC_PLL_CTRL2);
++
++		/*
++		 * PLL_CTRL1 doubles as the xHCI port-enable mask: the SoC
++		 * synthesises HCSPARAMS1.MaxPorts from it. Clearing it above
++		 * (done to release USBSTS.CNR) also drops the third port, so
++		 * the core reports only 2 ports and the SuperSpeed root hub
++		 * ends up with none - which in turn kills the second USB2
++		 * port as well. Restore the enable mask afterwards.
++		 * Verified on ZN-AX173G (EN7529CT): 0x20f -> MaxPorts=3,
++		 * 0x0 -> MaxPorts=2, writing 0x20f back -> MaxPorts=3 again.
++		 */
++		writel(AIROHA_USB_IPPC_PLL_CTRL1_PORT_EN,
++		       priv->ippc + AIROHA_USB_IPPC_PLL_CTRL1);
++
++		for (index = 0; index < AIROHA_USB_IPPC_PORT_CTRL_NUM; index++) {
++			u32 off = AIROHA_USB_IPPC_PORT_CTRL0 + index * 4;
++
++			val = readl(priv->ippc + off);
++			writel(val & ~(AIROHA_USB_IPPC_PORT_PDN |
++				       AIROHA_USB_IPPC_PORT_DIS),
++			       priv->ippc + off);
++		}
++		usleep_range(1000, 1500);
++
++		/* Kick the second USB2 port once xhci has taken over. */
++		schedule_delayed_work(&airoha_usb_port3_work,
++				      msecs_to_jiffies(15000));
++	}
++
++	for (index = 0; index < AIROHA_PHY_USB_MAX; index++) {
++		enum airoha_usb_phy_instance_type phy_type;
++		struct airoha_usb_phy_instance *instance;
++
++		switch (index) {
++		case AIROHA_PHY_USB2:
++			phy_type = PHY_TYPE_USB2;
++			break;
++		case AIROHA_PHY_USB3:
++			phy_type = PHY_TYPE_USB3;
++			break;
++		}
++
++		/* Skip registering USB3 instance if not supported */
++		if (phy_type == PHY_TYPE_USB3) {
++			ret = of_property_read_u32(dev->of_node, "airoha,serdes-port",
++						   &priv->serdes_port);
++			if (ret)
++				continue;
++
++			/* With Serdes Port property, SCU is required */
++			priv->scu = syscon_regmap_lookup_by_phandle(dev->of_node,
++								    "airoha,scu");
++			if (IS_ERR(priv->scu))
++				return dev_err_probe(dev, PTR_ERR(priv->scu), "failed to get SCU syscon.\n");
++		}
++
++		instance = devm_kzalloc(dev, sizeof(*instance), GFP_KERNEL);
++		if (!instance)
++			return -ENOMEM;
++
++		instance->type = phy_type;
++		priv->phys[index] = instance;
++
++		instance->phy = devm_phy_create(dev, NULL, &airoha_phy);
++		if (IS_ERR(instance->phy))
++			return dev_err_probe(dev, PTR_ERR(instance->phy), "failed to create phy\n");
++
++		phy_set_drvdata(instance->phy, instance);
++	}
++
++	/*
++	 * Boards where no USB controller consumes the PHY through the generic
++	 * PHY framework (the xHCI platform driver does not) need the PHY
++	 * brought up here, before the host controller probes.
++	 */
++	if (of_property_read_bool(dev->of_node, "airoha,init-on-probe")) {
++		for (index = 0; index < AIROHA_PHY_USB_MAX; index++) {
++			if (!priv->phys[index] ||
++			    priv->phys[index]->type != PHY_TYPE_USB2)
++				continue;
++
++			if (priv->scu && phy_get_mode(priv->phys[index]->phy) ==
++			    PHY_MODE_PCIE)
++				continue;
++
++			airoha_usb_phy_u2_init(priv, AIROHA_USB_PHY_U2_CH0);
++			airoha_usb_phy_u2_init(priv, AIROHA_USB_PHY_U2_CH1);
++			airoha_usb_phy_u2_power_on(priv);
++		}
++	}
++
++	phy_provider = devm_of_phy_provider_register(&pdev->dev, airoha_usb_phy_xlate);
++
++	return PTR_ERR_OR_ZERO(phy_provider);
++}
++
++static const struct of_device_id airoha_phy_id_table[] = {
++	{ .compatible = "airoha,an7581-usb-phy" },
++	{ },
++};
++MODULE_DEVICE_TABLE(of, airoha_phy_id_table);
++
++static struct platform_driver airoha_usb_driver = {
++	.probe		= airoha_usb_phy_probe,
++	.driver		= {
++		.name	= "airoha-usb-phy",
++		.of_match_table = airoha_phy_id_table,
++	},
++};
++
++module_platform_driver(airoha_usb_driver);
++
++MODULE_AUTHOR("Christian Marangi <ansuelsmth@gmail.com>");
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("Airoha USB PHY driver");

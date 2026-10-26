@@ -1,0 +1,54 @@
+#!/bin/sh
+# First-boot fixups: USB LEDs, Internet LED port, U disk auto-mount, ksmbd share.
+# Needed because an existing overlay keeps /etc/config/system, so board.d/01_leds
+# never runs again after a sysupgrade.
+
+# 1) USB port LEDs (verified on hardware: USB1=GPIO6, USB2=GPIO7, active-low)
+if ! uci -q get system.led_usb1 >/dev/null 2>&1; then
+	uci add system led >/dev/null
+	uci rename system.@led[-1]='led_usb1'
+	uci set system.led_usb1.name='USB1'
+	uci set system.led_usb1.sysfs='green:usb1'
+	uci set system.led_usb1.trigger='usbport'
+	uci add_list system.led_usb1.ports='usb1-port1'
+fi
+if ! uci -q get system.led_usb2 >/dev/null 2>&1; then
+	uci add system led >/dev/null
+	uci rename system.@led[-1]='led_usb2'
+	uci set system.led_usb2.name='USB2'
+	uci set system.led_usb2.sysfs='green:usb2'
+	uci set system.led_usb2.trigger='usbport'
+	uci add_list system.led_usb2.ports='usb1-port2'
+fi
+
+# 2) Internet LED follows the real WAN port (eth3), not a LAN port
+if uci -q get system.led_internet >/dev/null 2>&1; then
+	uci set system.led_internet.dev='eth1'
+fi
+uci commit system
+
+# 3) block-mount: mount any inserted USB storage under /mnt
+uci -q get fstab.@global[0] >/dev/null 2>&1 || uci add fstab globals
+uci set fstab.@global[0].anon_mount='1'
+uci set fstab.@global[0].auto_mount='1'
+uci set fstab.@global[0].check_fs='0'
+uci commit fstab
+
+# 4) ksmbd: share /mnt read-write, guest allowed
+if ! uci -q get ksmbd.share_usb >/dev/null 2>&1; then
+	uci add ksmbd share >/dev/null
+	uci rename ksmbd.@share[-1]='share_usb'
+	uci set ksmbd.share_usb.name='usb'
+	uci set ksmbd.share_usb.path='/mnt'
+	uci set ksmbd.share_usb.comment='USB storage'
+	uci set ksmbd.share_usb.read_only='no'
+	uci set ksmbd.share_usb.guest_ok='yes'
+	uci set ksmbd.share_usb.create_mask='0666'
+	uci set ksmbd.share_usb.dir_mask='0777'
+	uci set ksmbd.share_usb.force_root='1'
+	uci commit ksmbd
+fi
+
+/etc/init.d/fstab enable 2>/dev/null
+/etc/init.d/ksmbd enable 2>/dev/null
+exit 0

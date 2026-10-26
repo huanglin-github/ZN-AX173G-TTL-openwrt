@@ -1,0 +1,11 @@
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -2300,7 +2300,7 @@
+ #if IS_ENABLED(CONFIG_VLAN_8021Q)
+ 	struct vlan_info __rcu	*vlan_info;
+ #endif
+-#if IS_ENABLED(CONFIG_NET_DSA)
++#if 1 /* airoha en7523: keep dsa_ptr so struct net_device layout matches out-of-tree mac80211 backports */
+ 	struct dsa_port		*dsa_ptr;
+ #endif
+ #if IS_ENABLED(CONFIG_TIPC)
