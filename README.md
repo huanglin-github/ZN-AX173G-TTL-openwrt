@@ -22,7 +22,7 @@
 |---|---|---|
 | U-Boot 命令行（串口打断 autoboot 后） | telecomadmin | nE7jA%5m |
 | 原厂系统 telnet / 串口登录 | admin | aDm8H%MdA |
-| 原厂系统提权（su） | — | @Huang8369687 |
+| 原厂系统提权（su） | — | 路由器背面的密码或已经修改的web密码 |
 
 > 原厂提示符：U-Boot 为 `ECNT>`；原厂系统 telnet 登录后用 `su` 提权。
 > 原厂调试命令：`sys memrl <地址>` 读寄存器、`sys memwl <地址> <值>` 写寄存器、
