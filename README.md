@@ -1,5 +1,7 @@
 # 移动兆能 ZN-AX173G（EcoNet EN7523）TTL 刷 OpenWrt 完整源码
 
+![工具界面](docs/ui-preview.png)
+
 本仓库是**可以直接一次编译出固件的完整 OpenWrt 源码树**（6.18 快照 + feeds + 配置），
 已包含针对移动兆能 ZN-AX173G 路由器的全部移植改动，以及 PC 端 TTL 刷机工具。
 

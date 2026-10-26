@@ -78,22 +78,24 @@ DEFAULT_IMG = os.path.join(
     HERE, "firmware_191mb",
     "openwrt-airoha-en7523-airoha_en7523-ax3000-router-squashfs-sysupgrade.bin")
 
-BG = "#eef1f6"          # 窗口底
+BG = "#f4f6f9"          # 窗口底
 CARD = "#ffffff"        # 卡片底
 BG2 = CARD              # 兼容旧引用
-FG = "#21262f"          # 主文字
-SUB = "#69738a"         # 次文字
-ACC = "#3f6df0"         # 靛蓝强调
-LINE = "#dde3ec"        # 边框
-BTN = dict(bg="#f4f6fa", fg="#2a3140", activebackground="#e5eaf4",
-           activeforeground="#1f2430", relief="flat", bd=0, padx=10, pady=7,
+FG = "#1d2433"          # 主文字
+SUB = "#8b95a7"         # 次文字
+ACC = "#2f6bff"         # 强调蓝
+LINE = "#e8ecf3"        # 边框
+TERM_BG = "#12171f"     # 终端底
+TERM_FG = "#c7d2e0"     # 终端字
+BTN = dict(bg="#f4f6fa", fg="#28303d", activebackground="#e9edf5",
+           activeforeground="#1d2433", relief="flat", bd=0, padx=10, pady=7,
            font=("Microsoft YaHei UI", 9), cursor="hand2")
-BTN_PRIMARY = dict(bg="#3f6df0", fg="#ffffff", activebackground="#2f57d0",
+BTN_PRIMARY = dict(bg="#2f6bff", fg="#ffffff", activebackground="#245be4",
                    activeforeground="#ffffff", relief="flat", bd=0, padx=10,
                    pady=7, font=("Microsoft YaHei UI", 9, "bold"),
                    cursor="hand2")
-BTN_RED = dict(bg="#fff5f5", fg="#c0392b", activebackground="#ffe1e1",
-               activeforeground="#a93226", relief="flat", bd=0, padx=10,
+BTN_RED = dict(bg="#fff3f3", fg="#d92d20", activebackground="#ffe6e6",
+               activeforeground="#c0261a", relief="flat", bd=0, padx=10,
                pady=7, font=("Microsoft YaHei UI", 9), cursor="hand2")
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
@@ -226,6 +228,183 @@ class SerialLink:
         return False
 
 
+# ---------------------------------------------------------------- 圆角控件
+import tkinter.font as tkfont
+
+YAHEI = "Microsoft YaHei UI"
+
+BTN_STYLES = {
+    "normal": dict(fill="#f4f6fa", hover="#e9edf5", press="#dfe5ef",
+                   line="#e4e9f1", fg="#28303d"),
+    "primary": dict(fill="#2f6bff", hover="#245be4", press="#1d4cc4",
+                    line="", fg="#ffffff"),
+    "danger": dict(fill="#fff3f3", hover="#ffe6e6", press="#ffd8d8",
+                   line="#ffd3d3", fg="#d92d20"),
+    "ghost": dict(fill="#ffffff", hover="#f4f6fa", press="#eaeff7",
+                  line="#e4e9f1", fg="#4b5566"),
+}
+
+
+def round_rect(cv, x1, y1, x2, y2, r, **kw):
+    """在 Canvas 上画圆角矩形（平滑多边形近似）。"""
+    r = max(0, min(r, (x2 - x1) / 2.0, (y2 - y1) / 2.0))
+    pts = [
+        x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
+        x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+        x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+    ]
+    return cv.create_polygon(pts, smooth=True, **kw)
+
+
+class RoundButton(tk.Canvas):
+    """圆角按钮：Canvas 自绘，不依赖系统原生外观。"""
+
+    def __init__(self, master, text="", command=None, kind="normal",
+                 height=34, stretch=False, font=(YAHEI, 9), bg=None,
+                 padx=16, radius=9):
+        self._bg = bg or master.cget("bg")
+        super().__init__(master, bd=0, highlightthickness=0, bg=self._bg,
+                         height=height, cursor="hand2", takefocus=0,
+                         width=1 if stretch else 1)
+        self.text = text
+        self.command = command
+        self.kind = kind
+        self.font = font
+        self._stretch = stretch
+        self._padx = padx
+        self._radius = radius
+        self._hover = False
+        self._pressed = False
+        self._enabled = True
+        self._mf = tkfont.Font(font=self.font)
+        self.configure(width=(1 if stretch else
+                              self._mf.measure(text) + padx * 2))
+        self.bind("<Configure>", lambda e: self._redraw())
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<ButtonRelease-1>", self._on_release)
+
+    # -- 状态
+    def set_text(self, text):
+        self.text = text
+        if not self._stretch:
+            self.configure(width=self._mf.measure(text) + self._padx * 2)
+        self._redraw()
+
+    def set_enabled(self, on):
+        self._enabled = bool(on)
+        self.configure(cursor="hand2" if on else "arrow")
+        self._redraw()
+
+    def set_kind(self, kind):
+        self.kind = kind
+        self._redraw()
+
+    def config(self, **kw):
+        if "text" in kw:
+            self.set_text(kw.pop("text"))
+        if "state" in kw:
+            self.set_enabled(kw.pop("state") != "disabled")
+        if kw:
+            super().config(**kw)
+
+    configure = config
+
+    # -- 事件
+    def _on_enter(self, _=None):
+        if self._enabled:
+            self._hover = True
+            self._redraw()
+
+    def _on_leave(self, _=None):
+        self._hover = self._pressed = False
+        self._redraw()
+
+    def _on_press(self, _=None):
+        if self._enabled:
+            self._pressed = True
+            self._redraw()
+
+    def _on_release(self, _=None):
+        if not self._enabled:
+            return
+        was = self._pressed
+        self._pressed = False
+        self._hover = True
+        self._redraw()
+        if was and self.command:
+            self.command()
+
+    # -- 绘制
+    def _redraw(self):
+        self.delete("all")
+        w = self.winfo_width() or int(self["width"])
+        h = self.winfo_height() or int(self["height"])
+        if w <= 1 or h <= 1:
+            return
+        st = BTN_STYLES.get(self.kind, BTN_STYLES["normal"])
+        if not self._enabled:
+            fill, line, fg = "#f7f8fb", "#eef1f6", "#b3bcc9"
+        elif self._pressed:
+            fill, line, fg = st["press"], st["line"], st["fg"]
+        elif self._hover:
+            fill, line, fg = st["hover"], st["line"], st["fg"]
+        else:
+            fill, line, fg = st["fill"], st["line"], st["fg"]
+        kw = dict(fill=fill, outline=line if line else fill)
+        if line:
+            kw["width"] = 1
+        round_rect(self, 1, 1, w - 1, h - 1, self._radius, **kw)
+        self.create_text(w / 2.0, h / 2.0 + 1, text=self.text, fill=fg,
+                         font=self.font)
+
+
+class RoundProgress(tk.Canvas):
+    """圆角进度条。"""
+
+    def __init__(self, master, height=8, bg=None, color="#2f6bff"):
+        self._bg = bg or master.cget("bg")
+        super().__init__(master, bd=0, highlightthickness=0, bg=self._bg,
+                         height=height)
+        self._pct = 0
+        self._color = color
+        self.bind("<Configure>", lambda e: self._redraw())
+
+    def set(self, pct):
+        self._pct = max(0, min(100, int(pct)))
+        self._redraw()
+
+    def reset(self):
+        self.set(0)
+
+    def _redraw(self):
+        self.delete("all")
+        w = self.winfo_width()
+        h = self.winfo_height() or 8
+        if w <= 1:
+            return
+        r = h / 2.0
+        round_rect(self, 0, 0, w, h, r, fill="#e7ebf3", outline="")
+        if self._pct > 0:
+            fw = max(h, w * self._pct / 100.0)
+            round_rect(self, 0, 0, fw, h, r, fill=self._color, outline="")
+
+
+class Card(tk.Frame):
+    """白底卡片：细边框 + 内边距。"""
+
+    def __init__(self, master, title=None, bg=CARD):
+        super().__init__(master, bg=bg, highlightthickness=1,
+                         highlightbackground="#e8ecf3",
+                         highlightcolor="#e8ecf3")
+        self.body = self
+        if title:
+            tk.Label(self, text=title, bg=bg, fg="#8b95a7",
+                     font=(YAHEI, 9, "bold")).pack(anchor="w", padx=14,
+                                                   pady=(12, 6))
+
+
 # ---------------------------------------------------------------- App
 class App:
     def __init__(self, root):
@@ -246,105 +425,148 @@ class App:
     def build_ui(self):
         r = self.root
         r.title("ZN-AX173G (EN7523) TTL 工具台")
-        r.geometry("1220x780")
+        r.geometry("1240x800")
         r.configure(bg=BG)
-        r.minsize(1020, 660)
+        r.minsize(1080, 700)
         try:
             ttk.Style().theme_use("vista")
         except Exception:
             pass
 
-        # ---- 顶栏
-        top = tk.Frame(r, bg=CARD, highlightthickness=1,
-                       highlightbackground=LINE)
-        top.pack(fill="x")
-        inner = tk.Frame(top, bg=CARD)
-        inner.pack(fill="x", padx=14, pady=9)
-        tk.Label(inner, text="ZN-AX173G TTL 工具台", bg=CARD, fg=FG,
-                 font=("Microsoft YaHei UI", 11, "bold")).pack(side="left")
-        self.conn_var = tk.StringVar(value="未连接")
-        tk.Label(inner, textvariable=self.conn_var, bg=CARD, fg=SUB,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left", padx=(14, 0))
-        bar = tk.Frame(inner, bg=CARD)
+        # ================= 顶栏
+        header = tk.Frame(r, bg=CARD, highlightthickness=1,
+                          highlightbackground=LINE)
+        header.pack(fill="x")
+        hinner = tk.Frame(header, bg=CARD)
+        hinner.pack(fill="x", padx=18, pady=11)
+
+        brand = tk.Frame(hinner, bg=CARD)
+        brand.pack(side="left")
+        logo = tk.Canvas(brand, width=34, height=34, bg=CARD, bd=0,
+                         highlightthickness=0)
+        logo.pack(side="left")
+        round_rect(logo, 1, 1, 33, 33, 10, fill=ACC, outline="")
+        logo.create_text(17, 18, text="ZN", fill="#ffffff",
+                         font=(YAHEI, 10, "bold"))
+        tt = tk.Frame(brand, bg=CARD)
+        tt.pack(side="left", padx=(11, 0))
+        tk.Label(tt, text="ZN-AX173G TTL 工具台", bg=CARD, fg=FG,
+                 font=(YAHEI, 12, "bold")).pack(anchor="w")
+        tk.Label(tt, text="EcoNet EN7523 · 刷机 / 备份 / 还原",
+                 bg=CARD, fg=SUB, font=(YAHEI, 8)).pack(anchor="w")
+
+        bar = tk.Frame(hinner, bg=CARD)
         bar.pack(side="right")
+        dot = tk.Canvas(bar, width=12, height=12, bg=CARD, bd=0,
+                        highlightthickness=0)
+        dot.pack(side="left", padx=(0, 5))
+        self._conn_dot_canvas = dot
+        self._conn_dot = dot.create_oval(3, 3, 10, 10, fill="#c9d1dd",
+                                         outline="")
+        self.conn_var = tk.StringVar(value="未连接")
+        tk.Label(bar, textvariable=self.conn_var, bg=CARD, fg=SUB,
+                 font=(YAHEI, 9)).pack(side="left", padx=(0, 18))
+
         tk.Label(bar, text="串口", bg=CARD, fg=SUB,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left")
+                 font=(YAHEI, 9)).pack(side="left")
         self.port_var = tk.StringVar(value="COM6")
-        self.cb_port = ttk.Combobox(bar, textvariable=self.port_var, width=22,
+        self.cb_port = ttk.Combobox(bar, textvariable=self.port_var, width=20,
                                     state="readonly")
-        self.cb_port.pack(side="left", padx=6)
-        tk.Button(bar, text="刷新", command=self.refresh_ports, **BTN).pack(side="left")
+        self.cb_port.pack(side="left", padx=(6, 6))
+        b = RoundButton(bar, "刷新", command=self.refresh_ports, kind="ghost",
+                        height=28, padx=12, bg=CARD, font=(YAHEI, 8))
+        b.pack(side="left")
         self.baud_var = tk.StringVar(value="115200")
-        ttk.Combobox(bar, textvariable=self.baud_var, width=7, state="readonly",
+        ttk.Combobox(bar, textvariable=self.baud_var, width=7,
+                     state="readonly",
                      values=["115200", "57600", "38400", "9600"]).pack(
             side="left", padx=6)
-        self.btn_conn = tk.Button(bar, text="连接", command=self.toggle_connect,
-                                  **BTN_PRIMARY)
-        self.btn_conn.pack(side="left", padx=(6, 0))
+        self.btn_conn = RoundButton(bar, "连接", command=self.toggle_connect,
+                                    kind="primary", height=30, padx=22,
+                                    bg=CARD, font=(YAHEI, 9, "bold"))
+        self.btn_conn.pack(side="left", padx=(4, 0))
 
-        # ---- 主体
+        # ================= 主体
         body = tk.Frame(r, bg=BG)
-        body.pack(fill="both", expand=True, padx=12, pady=10)
+        body.pack(fill="both", expand=True, padx=16, pady=14)
         left = tk.Frame(body, bg=BG)
         left.pack(side="left", fill="both", expand=True)
-        right = tk.Frame(body, bg=BG, width=392)
-        right.pack(side="right", fill="y", padx=(12, 0))
+        right = tk.Frame(body, bg=BG, width=398)
+        right.pack(side="right", fill="y", padx=(14, 0))
         right.pack_propagate(False)
 
-        # 终端卡片
+        # ---- 终端卡片
         termcard = tk.Frame(left, bg=CARD, highlightthickness=1,
                             highlightbackground=LINE)
         termcard.pack(fill="both", expand=True)
         th = tk.Frame(termcard, bg=CARD)
-        th.pack(fill="x", padx=10, pady=(8, 4))
+        th.pack(fill="x", padx=16, pady=(12, 8))
         tk.Label(th, text="串口日志", bg=CARD, fg=FG,
-                 font=("Microsoft YaHei UI", 9, "bold")).pack(side="left")
-        tk.Button(th, text="清屏", command=self.clear_log, **BTN).pack(side="right")
-        tk.Button(th, text="保存日志", command=self.save_log, **BTN).pack(
-            side="right", padx=(0, 6))
-        term = tk.Frame(termcard, bg=CARD)
-        term.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        self.txt = tk.Text(term, bg="#24292f", fg="#d4d4d4", insertbackground=ACC,
-                           font=("Consolas", 9), wrap="char", bd=0, padx=8, pady=6,
-                           selectbackground="#094771", relief="flat")
-        sb = tk.Scrollbar(term, command=self.txt.yview, bd=0)
+                 font=(YAHEI, 10, "bold")).pack(side="left")
+        tk.Label(th, text="115200 · 8N1", bg=CARD, fg=SUB,
+                 font=(YAHEI, 8)).pack(side="left", padx=(8, 0))
+        b = RoundButton(th, "清屏", command=self.clear_log, kind="ghost",
+                        height=28, padx=12, bg=CARD, font=(YAHEI, 8))
+        b.pack(side="right")
+        b = RoundButton(th, "保存日志", command=self.save_log, kind="ghost",
+                        height=28, padx=12, bg=CARD, font=(YAHEI, 8))
+        b.pack(side="right", padx=(0, 6))
+
+        tk.Frame(termcard, bg="#f1f4f8", height=1).pack(fill="x", padx=16,
+                                                        pady=(0, 10))
+        term = tk.Frame(termcard, bg=TERM_BG)
+        term.pack(fill="both", expand=True, padx=14, pady=(0, 14))
+        self.txt = tk.Text(term, bg=TERM_BG, fg=TERM_FG,
+                           insertbackground="#7ea8ff",
+                           font=("Consolas", 9), wrap="char", bd=0,
+                           padx=12, pady=10, selectbackground="#1f4a8f",
+                           relief="flat", highlightthickness=0)
+        sb = ttk.Scrollbar(term, orient="vertical", command=self.txt.yview)
         self.txt.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.txt.pack(side="left", fill="both", expand=True)
         self.txt.bind("<Key>", self._text_key)
 
-        # 命令行 + 进度
+        # ---- 命令行
         row = tk.Frame(left, bg=BG)
-        row.pack(fill="x", pady=(8, 4))
+        row.pack(fill="x", pady=(10, 6))
         self.ent = tk.Entry(row, bg=CARD, fg=FG, insertbackground=ACC,
                             relief="flat", font=("Consolas", 10),
-                            highlightthickness=1, highlightbackground=LINE)
-        self.ent.pack(side="left", fill="x", expand=True, ipady=7)
+                            highlightthickness=1, highlightbackground=LINE,
+                            highlightcolor=ACC)
+        self.ent.pack(side="left", fill="x", expand=True, ipady=8)
         self.ent.bind("<Return>", self._on_enter)
         self.ent.bind("<Up>", self._hist_prev)
         self.ent.bind("<Down>", self._hist_next)
-        b = tk.Button(row, text="发送", command=self.send_line, **BTN)
-        b.pack(side="left", padx=(8, 0))
+        b = RoundButton(row, "发送", command=self.send_line, kind="primary",
+                        height=34, padx=20, bg=BG, font=(YAHEI, 9, "bold"))
+        b.pack(side="left", padx=(10, 0))
         self.btns.append(b)
+
+        # ---- 状态 + 进度
         prow = tk.Frame(left, bg=BG)
-        prow.pack(fill="x", pady=(0, 0))
+        prow.pack(fill="x")
         self.stat_var = tk.StringVar(value="就绪")
         tk.Label(prow, textvariable=self.stat_var, bg=BG, fg=ACC,
-                 font=("Microsoft YaHei UI", 9, "bold"), width=46,
+                 font=(YAHEI, 9, "bold"), width=40,
                  anchor="w").pack(side="left")
-        self.pbar = ttk.Progressbar(prow, mode="determinate", length=200)
-        self.pbar.pack(side="right", fill="x", expand=True, padx=(10, 0))
+        self.pbar = RoundProgress(prow, height=8, bg=BG, color=ACC)
+        self.pbar.pack(side="right", fill="x", expand=True, padx=(8, 0),
+                       pady=5)
 
-        # ---- 右侧：可滚动卡片列
+        # ---- 右侧：操作卡片
         canvas = tk.Canvas(right, bg=BG, bd=0, highlightthickness=0)
-        vsb = tk.Scrollbar(right, orient="vertical", command=canvas.yview)
+        vsb = ttk.Scrollbar(right, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
         canvas.pack(side="left", fill="both", expand=True)
         col = tk.Frame(canvas, bg=BG)
-        canvas.create_window((0, 0), window=col, anchor="nw", tags="inner")
+        win = canvas.create_window((0, 0), window=col, anchor="nw",
+                                   tags="inner")
         col.bind("<Configure>",
                  lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfigure(win, width=e.width))
         canvas.bind_all("<MouseWheel>",
                         lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
         self._col = col
@@ -352,80 +574,87 @@ class App:
         def card(title):
             cf = tk.Frame(col, bg=CARD, highlightthickness=1,
                           highlightbackground=LINE)
-            cf.pack(fill="x", pady=(0, 6))
+            cf.pack(fill="x", pady=(0, 12))
             tk.Label(cf, text=title, bg=CARD, fg=SUB,
-                     font=("Microsoft YaHei UI", 9, "bold")).pack(
-                anchor="w", padx=10, pady=(7, 2))
+                     font=(YAHEI, 9, "bold")).pack(anchor="w", padx=16,
+                                                   pady=(12, 8))
             return cf
 
-        def grow(cf, text, cmd, style=BTN, pad=(0, 4)):
-            b = tk.Button(cf, text=text, command=cmd, **style)
-            b.pack(fill="x", padx=10, pady=pad)
+        def grow(cf, text, cmd, kind="normal", pad=(0, 8), h=34):
+            b = RoundButton(cf, text, command=cmd, kind=kind, height=h,
+                            stretch=True, padx=14, bg=CARD)
+            b.pack(fill="x", padx=16, pady=pad)
             self.btns.append(b)
             return b
 
-        def grow2(cf, t1, c1, t2, c2, s1=BTN, s2=BTN):
+        def grow2(cf, t1, c1, t2, c2, k1="normal", k2="normal",
+                  pad=(0, 8)):
             f = tk.Frame(cf, bg=CARD)
-            f.pack(fill="x", padx=10, pady=(0, 4))
-            b = tk.Button(f, text=t1, command=c1, **s1)
+            f.pack(fill="x", padx=16, pady=pad)
+            b = RoundButton(f, t1, command=c1, kind=k1, height=34,
+                            stretch=True, padx=10, bg=CARD)
             b.pack(side="left", fill="x", expand=True)
             self.btns.append(b)
-            b = tk.Button(f, text=t2, command=c2, **s2)
-            b.pack(side="left", fill="x", expand=True, padx=(6, 0))
+            b = RoundButton(f, t2, command=c2, kind=k2, height=34,
+                            stretch=True, padx=10, bg=CARD)
+            b.pack(side="left", fill="x", expand=True, padx=(8, 0))
             self.btns.append(b)
 
         # ① 设备控制
-        cf = card("① 设备控制")
+        cf = card("设备控制")
         grow2(cf, "设备自检", lambda: self.run_task(self.task_selfcheck),
               "重启设备", self.ask_reboot)
         grow(cf, "进 U-Boot（重启并打断 autoboot）",
-             lambda: self.run_task(self.task_enter_uboot))
+             lambda: self.run_task(self.task_enter_uboot), pad=(0, 16))
 
         # ② 刷写 OpenWrt
-        cf = card("② 刷写 OpenWrt")
+        cf = card("刷写 OpenWrt")
         self.img_var = tk.StringVar(
             value=DEFAULT_IMG if os.path.isfile(DEFAULT_IMG) else "")
-        fe = tk.Frame(cf, bg=CARD)
-        fe.pack(fill="x", padx=10)
-        tk.Entry(fe, textvariable=self.img_var, bg="#f6f8fb", fg=FG,
-                 insertbackground=ACC, relief="flat", font=("Consolas", 9),
+        tk.Entry(cf, textvariable=self.img_var, bg="#f7f9fc", fg="#41506b",
+                 insertbackground=ACC, relief="flat", font=("Consolas", 8),
                  highlightthickness=1, highlightbackground=LINE).pack(
-            fill="x", ipady=6, pady=(0, 5))
+            fill="x", padx=16, ipady=6, pady=(0, 8))
         f2 = tk.Frame(cf, bg=CARD)
-        f2.pack(fill="x", padx=10, pady=(0, 5))
-        tk.Button(f2, text="浏览镜像…", command=self.pick_image,
-                  **BTN).pack(side="left", fill="x", expand=True)
-        tk.Label(f2, text=" 偏移 ", bg=CARD, fg=SUB,
-                 font=("Microsoft YaHei UI", 9)).pack(side="left")
+        f2.pack(fill="x", padx=16, pady=(0, 10))
+        b = RoundButton(f2, "浏览镜像…", command=self.pick_image,
+                        kind="ghost", height=34, stretch=True, padx=10,
+                        bg=CARD)
+        b.pack(side="left", fill="x", expand=True)
+        self.btns.append(b)
+        tk.Label(f2, text="偏移", bg=CARD, fg=SUB,
+                 font=(YAHEI, 9)).pack(side="left", padx=(10, 6))
         self.addr_var = tk.StringVar(value="0x1ec0000")
-        tk.Entry(f2, textvariable=self.addr_var, bg="#f6f8fb", fg=FG,
-                 insertbackground=ACC, relief="flat", width=11,
+        tk.Entry(f2, textvariable=self.addr_var, bg="#f7f9fc", fg=FG,
+                 insertbackground=ACC, relief="flat", width=10,
                  font=("Consolas", 9), highlightthickness=1,
                  highlightbackground=LINE).pack(side="left", ipady=6)
+
         self.opt_boot = tk.BooleanVar(value=True)
         self.opt_bootcmd = tk.BooleanVar(value=False)
         for var, text in ((self.opt_boot, "写完从 RAM 启动验证"),
                           (self.opt_bootcmd, "顺便固化 bootcmd")):
-            tk.Checkbutton(cf, text=text, variable=var, bg=CARD, fg=FG,
+            tk.Checkbutton(cf, text=text, variable=var, bg=CARD, fg="#3b4554",
                            activebackground=CARD, activeforeground=FG,
-                           selectcolor="#f6f8fb", anchor="w",
-                           font=("Microsoft YaHei UI", 9), bd=0).pack(
-                fill="x", padx=13)
+                           selectcolor="#f7f9fc", anchor="w",
+                           font=(YAHEI, 9), bd=0,
+                           highlightthickness=0).pack(fill="x", padx=18)
         grow(cf, "立即刷机（TFTP → 擦写 → 校验）", self.ask_flash,
-             BTN_PRIMARY, pad=(10, 6))
+             "primary", pad=(0, 8), h=36)
         grow(cf, "仅加载到 RAM 验证（不写 flash）",
-             lambda: self.run_task(self.task_flash, True), pad=(10, 8))
+             lambda: self.run_task(self.task_flash, True), pad=(0, 16))
 
         # ③ 备份与还原
-        cf = card("③ 备份与还原")
+        cf = card("备份与还原")
         grow(cf, "备份原厂固件（masterbank 30MB → PC）",
              lambda: self.run_task(self.task_backup_stock))
         grow2(cf, "备份分区…", self.ask_backup,
-              "分区/mtdparts", lambda: self.run_task(self.task_partitions))
+              "分区 / mtdparts", lambda: self.run_task(self.task_partitions))
         grow2(cf, "还原原厂固件（写 masterbank）", self.ask_restore_stock_fw,
-              "切换原厂引导", self.ask_restore, BTN_RED, BTN)
+              "切换原厂引导", self.ask_restore, "danger", "normal")
         grow(cf, "固化 bootcmd（断电自动进 OpenWrt）",
-             lambda: self.run_task(self.task_fix_bootcmd), pad=(10, 8))
+             lambda: self.run_task(self.task_fix_bootcmd), pad=(0, 16))
+
 
         self.refresh_ports()
         self._append("ZN-AX173G TTL 工具台已就绪\n"
@@ -438,12 +667,9 @@ class App:
         self.q.put(("pbar", max(0, min(100, int(pct)))))
 
     def _section(self, parent, title):
-        tk.Frame(parent, bg="#e1e1e1", height=1).pack(fill="x", padx=12, pady=(12, 6))
-
-    def _section(self, parent, title):
-        tk.Frame(parent, bg="#e1e1e1", height=1).pack(fill="x", padx=12, pady=(12, 6))
-        tk.Label(parent, text=title, bg=BG2, fg="#616161",
-                 font=("Microsoft YaHei UI", 8, "bold")).pack(anchor="w", padx=12, pady=(0, 4))
+        tk.Frame(parent, bg=LINE, height=1).pack(fill="x", padx=12, pady=(12, 6))
+        tk.Label(parent, text=title, bg=BG2, fg=SUB,
+                 font=(YAHEI, 8, "bold")).pack(anchor="w", padx=12, pady=(0, 4))
 
     # ---------------- 日志
     def _text_key(self, e):
@@ -500,9 +726,9 @@ class App:
         if stat is not None:
             self.stat_var.set(stat)
         if pbar is not None:
-            self.pbar["value"] = pbar
+            self.pbar.set(pbar)
             if pbar >= 100:
-                self.root.after(1500, lambda: self.pbar.configure(value=0))
+                self.root.after(1600, self.pbar.reset)
         if done:
             self.busy = False
             self._set_enabled(True)
@@ -534,7 +760,9 @@ class App:
         if self.link.is_open:
             self.link.close()
             self.btn_conn.config(text="连接")
+            self.btn_conn.set_kind("primary")
             self.conn_var.set("未连接")
+            self._set_dot("#c9d1dd")
             self.log("\n[串口已断开]\n")
             return
         port = self.port_var.get()
@@ -549,8 +777,18 @@ class App:
                                  "%s\n\n可能被其他脚本/终端占用，先关掉再试。" % e)
             return
         self.btn_conn.config(text="断开")
+        self.btn_conn.set_kind("normal")
         self.conn_var.set("已连接 %s @%d" % (port, baud))
+        self._set_dot("#22c55e")
         self.log("\n[串口已打开 %s @%d]\n" % (port, baud))
+
+    def _set_dot(self, color):
+        try:
+            dot = getattr(self, "_conn_dot_canvas", None)
+            if dot:
+                dot.itemconfigure(self._conn_dot, fill=color)
+        except Exception:
+            pass
 
     # ---------------- 命令输入
     def _on_enter(self, _):
@@ -585,7 +823,10 @@ class App:
     def _set_enabled(self, on):
         for b in self.btns:
             try:
-                b.config(state="normal" if on else "disabled")
+                if hasattr(b, "set_enabled"):
+                    b.set_enabled(on)
+                else:
+                    b.config(state="normal" if on else "disabled")
             except Exception:
                 pass
 
