@@ -32,6 +32,21 @@ define Device/airoha_en7523-ax3000-router
 	luci-app-wol etherwake luci-i18n-wol-zh-cn \
 	luci-app-ksmbd luci-i18n-ksmbd-zh-cn \
 	luci-app-hd-idle hd-idle luci-i18n-hd-idle-zh-cn \
-	luci-app-openclash smartdns luci-app-diskman
+	luci-app-openclash smartdns luci-app-diskman \
+	kmod-tun \
+	relayd luci-proto-relay \
+	mwan3 luci-app-mwan3 \
+	luci-app-upnp \
+	zerotier luci-app-zerotier \
+	softethervpn5-server \
+	minidlna luci-app-minidlna \
+	transmission-web luci-app-transmission \
+	nfs-kernel-server kmod-nfsd \
+	kmod-cifs luci-app-cifs-mount \
+	p910nd kmod-usb-printer luci-app-p910nd \
+	samba4 luci-app-samba4 \
+	luci-app-nlbwmon luci-app-wrtbwmon \
+	luci-app-sqm luci-app-qos luci-app-statistics bcp38 \
+	luci-app-easytier luci-app-wechatpush
 endef
 TARGET_DEVICES += airoha_en7523-ax3000-router
