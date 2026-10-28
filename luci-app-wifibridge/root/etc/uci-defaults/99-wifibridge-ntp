@@ -1,0 +1,7 @@
+#!/bin/sh
+# 固化国内可达的 NTP 服务器，保证刷机/重启后系统时间可自动校准。
+# 设备无硬件时钟(RTC)，断电后开机瞬间时间会回退，联网后 NTP 自动校正。
+uci -q set system.ntp.server='ntp.aliyun.com ntp1.aliyun.com ntp2.aliyun.com cn.pool.ntp.org'
+uci -q set system.ntp.enabled='1'
+uci commit system
+exit 0

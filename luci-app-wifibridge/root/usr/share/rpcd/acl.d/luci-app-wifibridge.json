@@ -1,0 +1,23 @@
+{
+	"luci-app-wifibridge": {
+		"description": "Grant access to LuCI app wifibridge",
+		"read": {
+			"file": {
+				"/usr/libexec/wifibridge.sh": [ "exec" ]
+			},
+			"ubus": {
+				"iwinfo": [ "devices", "scan", "info" ]
+			},
+			"uci": [ "wireless", "network", "dhcp", "firewall", "wifibridge" ]
+		},
+		"write": {
+			"file": {
+				"/usr/libexec/wifibridge.sh": [ "exec" ]
+			},
+			"ubus": {
+				"iwinfo": [ "devices", "scan", "info" ]
+			},
+			"uci": [ "wireless", "network", "dhcp", "firewall", "wifibridge" ]
+		}
+	}
+}

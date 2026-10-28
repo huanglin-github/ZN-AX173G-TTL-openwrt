@@ -1,0 +1,25 @@
+#!/bin/sh /etc/rc.common
+START=99
+STOP=10
+
+apply_cfg() {
+	local enabled ssid key mode
+	config_load wifibridge
+	config_get enabled main enabled '0'
+	config_get ssid main ssid
+	config_get key main key
+	config_get mode main mode 'bridge'
+	[ "$enabled" = "1" ] && [ -n "$ssid" ] && /usr/libexec/wifibridge.sh apply "$ssid" "$key" "$mode" >/dev/null 2>&1
+}
+
+start() {
+	apply_cfg
+}
+
+restart() {
+	apply_cfg
+}
+
+stop() {
+	/usr/libexec/wifibridge.sh stop >/dev/null 2>&1
+}

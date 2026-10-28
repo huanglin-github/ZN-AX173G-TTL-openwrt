@@ -1,0 +1,13 @@
+{
+	"admin/network/wifibridge": {
+		"title": "无线中继",
+		"order": 80,
+		"action": {
+			"type": "view",
+			"path": "wifibridge"
+		},
+		"depends": {
+			"acl": [ "luci-app-wifibridge" ]
+		}
+	}
+}
