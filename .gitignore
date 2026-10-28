@@ -35,3 +35,13 @@ git-src
 .cproject
 .ccache
 .vscode*
+
+# --- 编译日志与临时产物（不纳入版本库，本地文件保留）---
+*.log
+*.out
+*.status
+*.bak
+/build.log
+/defconfig*.log
+/build-watchdog.sh
+analysis/*.log
