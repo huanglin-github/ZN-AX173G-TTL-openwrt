@@ -7,6 +7,18 @@
 
 > OpenWrt 官方英文说明见 [docs/README-openwrt-upstream.md](docs/README-openwrt-upstream.md)
 
+## 出处与致谢（本仓库代码来源）
+
+本仓库的 **EN7523 / AX3000（MediaTek MT7916 + MT7530）平台移植** 最初来自社区工作，特此致谢：
+
+- **OpenWrt 论坛移植帖子**（含构建说明与固件 blobs 获取方式）：
+  <https://forum.openwrt.org/t/release-openwrt-port-for-en7523-ax3000-router-mt7916-2x2-ax-mt7530-switch-build-instructions-firmware-blobs/253290>
+- **Kiwironic 的 `openwrt-en7523` 移植仓库**（设备树、平台补丁、固件 blobs 等基础代码来源）：
+  <https://github.com/Kiwironic/openwrt-en7523>
+
+> 本仓库在上述基础上，补充了 ZN-AX173G 机型的适配（USB、LED、TTL 刷机工具等），
+> 并追加了 `luci-app-wifibridge`（无线中继桥 LuCI 应用）等本地修改。
+
 ---
 
 ## ⚠️ 通用性说明
