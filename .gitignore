@@ -45,3 +45,4 @@ git-src
 /defconfig*.log
 /build-watchdog.sh
 analysis/*.log
+ttl_tools/firmware/
