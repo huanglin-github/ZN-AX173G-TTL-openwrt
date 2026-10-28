@@ -1,0 +1,25 @@
+#!/bin/sh
+# Bridge/relay scenario fix for the EN7523 AX3000 router.
+#
+# When the user deletes "wan" and bridges a STA (wwan) into lan via the
+# LuCI setup wizard, two problems appear on first boot:
+#   1. dnsmasq detects what it thinks is "another DHCP server" on br-lan
+#      (cross-talk between the radio STA/AP) and refuses to start, so the
+#      internal network gets no IP at all.  -> force=1 makes it serve anyway.
+#   2. LAN IPv6 was left in relay mode with no master interface (wan is
+#      gone), so wan6 gets no IPv6.  -> keep LAN in server mode: clients
+#      get a ULA and, if the upstream STA pulls a PD prefix, public v6 is
+#      handed down automatically.  No relay master is needed.
+#
+# Upstream OpenWrt (master) still ships ra/dhcpv6=server but no force=1,
+# so this device-level default is required and is harmless otherwise.
+. /lib/functions.sh
+
+[ "$(board_name)" = "airoha,en7523-ax3000-router" ] || exit 0
+
+uci -q set dhcp.lan.force='1'
+uci -q set dhcp.lan.ra='server'
+uci -q set dhcp.lan.dhcpv6='server'
+uci commit dhcp
+
+exit 0

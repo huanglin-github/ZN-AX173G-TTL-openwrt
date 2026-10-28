@@ -1,0 +1,20 @@
+#!/bin/sh
+# EN7523 AX3000: fix "wrong time after boot" by setting the local timezone and
+# China-reachable NTP servers. The default OpenWrt pool (openwrt.pool.ntp.org)
+# is often blocked/slow in CN, so ntpd never syncs and the box stays at 1970.
+# With reachable servers sysntpd (triggered on interface up) syncs as soon as
+# the box gets online. zoneinfo-asia must be built in for zonename to apply.
+. /lib/functions.sh
+
+uci -q set system.@system[-1].zonename='Asia/Shanghai'
+uci -q set system.@system[-1].timezone='CST-8'
+uci -q delete system.ntp.server
+add_list system.ntp.server='ntp.aliyun.com'
+add_list system.ntp.server='ntp1.aliyun.com'
+add_list system.ntp.server='time1.cloud.tencent.com'
+add_list system.ntp.server='cn.pool.ntp.org'
+add_list system.ntp.server='203.107.6.88'
+uci -q set system.ntp.enabled='1'
+uci commit system
+
+exit 0

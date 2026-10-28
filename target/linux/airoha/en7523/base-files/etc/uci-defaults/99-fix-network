@@ -1,12 +1,12 @@
 #!/bin/sh
-# EN7523 first-boot fixes + relay bridge setup
-# - timezone CST-8
+# EN7523 first-boot fixes (no pre-configured bridge/relay)
+# - timezone CST-8 / Asia/Shanghai
 # - DHCP force (avoid "already running DHCP-server" false positive from STA/AP co-located radio)
-# - IPv6 server mode (was relay with no master -> clients got no v6)
-# - enable cron (scheduled tasks / scheduled reboot)
-# - fix igmpproxy upstream interface (was 'wan', device uses 'wwan')
-# - relay bridge: put LAN into upstream subnet, disable local DHCP, create relay iface
-# NOTE: default upstream subnet is 192.168.1.x. Adjust if your upstream differs.
+# - IPv6 server mode for LAN
+# - enable cron
+# NOTE: bridging/relay to an upstream AP is NOT pre-configured. Configure it
+#       manually when needed (e.g. set LAN to 192.168.2.1, then add a relay
+#       interface bridging 'wwan' and 'lan').
 
 # 1) timezone
 uci set system.@system[0].timezone='CST-8'
@@ -23,21 +23,10 @@ uci set dhcp.lan.ndp='hybrid'
 # 4) enable cron
 /etc/init.d/cron enable
 
-# 5) fix igmpproxy upstream interface
-if uci -q get igmpproxy.@phyint[0] >/dev/null 2>&1; then
-	uci set igmpproxy.@phyint[0].network='wwan'
-	uci commit igmpproxy
-fi
+# 5) default LuCI language: Simplified Chinese
+uci set luci.main.lang='zh_cn'
+uci commit luci
 
-# 6) relay bridge -> LAN on upstream subnet, local DHCP off
-uci set network.lan.ipaddr='192.168.1.2'
-uci set network.lan.netmask='255.255.255.0'
-uci set network.lan.gateway='192.168.1.1'
-uci set network.lan.dns='192.168.1.1'
-uci set dhcp.lan.ignore='1'
-uci set network.stabridge='interface'
-uci set network.stabridge.proto='relay'
-uci set network.stabridge.network='lan wwan'
 uci commit network
 uci commit dhcp
 

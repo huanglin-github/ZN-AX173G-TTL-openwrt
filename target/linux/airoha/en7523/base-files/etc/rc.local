@@ -1,14 +1,20 @@
 #!/bin/sh
-#
-# Put anything here that should be executed at boot.
-#
-# xHCI PORTSC[3] (second USB2 port) is left at PLS=Unknown by our PHY driver;
-# the vendor firmware pokes it from userspace (sys memwl 1fab0440 A0). Do the
-# same here once per boot. Only works when CONFIG_IO_STRICT_DEVMEM is disabled.
-if [ -c /dev/mem ]; then
-	# PP=1 (port power) + PLS=5 (RxDetect)
-	printf '\240\002\000\000' | dd of=/dev/mem bs=4 seek=132825360 count=1 conv=notrunc 2>/dev/null
-	logger -t usb-port3 "PORTSC[3] poked to RxDetect"
-fi
+# Fix LED triggers for kernels where the netdev LED trigger has no 'mode' file
+# (newer kernels expose separate link/rx/tx flag files instead). OpenWrt's
+# uci/system 'option mode' cannot be written there, so the WiFi/Internet LEDs
+# stay off. We set the flags directly on sysfs, after interfaces are up.
+setup_led() {
+	local led="$1" dev="$2"
+	local d="/sys/class/leds/$led"
+	[ -d "$d" ] || return 0
+	echo netdev > "$d/trigger" 2>/dev/null
+	echo "$dev"  > "$d/device_name" 2>/dev/null
+	echo 1       > "$d/link" 2>/dev/null
+	echo 1       > "$d/rx" 2>/dev/null
+}
+
+setup_led green:wifi-2g  phy0-ap0
+setup_led green:wifi-5g   phy1-ap0
+setup_led green:internet  eth1
 
 exit 0

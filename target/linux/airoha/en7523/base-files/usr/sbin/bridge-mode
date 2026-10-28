@@ -1,0 +1,65 @@
+#!/bin/sh
+# bridge-mode: switch the EN7523 AX3000 between two wireless-bridge styles.
+#
+#   bridge-mode nat    -> this router keeps serving DHCP/DNS on lan (NAT bridge).
+#                         Use when you bridge a STA/relay into lan but still want
+#                         this box to be the DHCP server for its own subnet.
+#                         (This is also the out-of-box default.)
+#
+#   bridge-mode same   -> "同网段" bridge: the upstream router serves DHCP/IPv6,
+#                         this box stops serving on lan to avoid a double-DHCP
+#                         conflict. Use for WDS(4addr)/802.11s/mesh/relayd bridges
+#                         where clients should sit on the upstream subnet.
+#
+#   bridge-mode status -> show the current mode.
+#
+# This only flips the DHCP/IPv6 *serving* mode. The actual bridging of the
+# STA/mesh interface into br-lan is done in LuCI (Network -> Interfaces):
+#   - NAT bridge : add a relay/wwan interface (lan + wwan) or just keep lan NAT.
+#   - same-subnet: set the STA/mesh iface to WDS (4addr) and add it to br-lan,
+#                  OR use LuCI "Relay bridge". For IPv6 relay you must also mark
+#                  the upstream interface as relay master, e.g.
+#                    uci set dhcp.wwan.master='1'; uci commit dhcp
+#                  (for a pure L2 bridge you may instead set ra/dhcpv6=disabled).
+
+usage() {
+	echo "Usage: $0 {nat|same|status}"
+	exit 1
+}
+
+[ -n "$1" ] || usage
+cmd="$1"
+
+case "$cmd" in
+	nat)
+		uci -q set dhcp.lan.force='1'
+		uci -q delete dhcp.lan.ignore || true
+		uci -q set dhcp.lan.ra='server'
+		uci -q set dhcp.lan.dhcpv6='server'
+		uci commit dhcp
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+		/etc/init.d/odhcpd restart >/dev/null 2>&1 || true
+		echo "NAT bridge mode: this router serves DHCP/IPv6 on lan."
+		;;
+	same)
+		uci -q set dhcp.lan.ignore='1'
+		uci -q set dhcp.lan.force='0'
+		uci -q set dhcp.lan.ra='relay'
+		uci -q set dhcp.lan.dhcpv6='relay'
+		uci commit dhcp
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+		/etc/init.d/odhcpd restart >/dev/null 2>&1 || true
+		echo "Same-subnet bridge mode: upstream serves DHCP/IPv6."
+		echo "Next: bridge the STA/mesh iface into br-lan in LuCI, and set the"
+		echo "upstream iface as relay master (uci set dhcp.<up>.master='1')."
+		;;
+	status)
+		echo "dhcp.lan.force   = $(uci -q get dhcp.lan.force)"
+		echo "dhcp.lan.ignore  = $(uci -q get dhcp.lan.ignore)"
+		echo "dhcp.lan.ra      = $(uci -q get dhcp.lan.ra)"
+		echo "dhcp.lan.dhcpv6  = $(uci -q get dhcp.lan.dhcpv6)"
+		;;
+	*)
+		usage
+		;;
+esac

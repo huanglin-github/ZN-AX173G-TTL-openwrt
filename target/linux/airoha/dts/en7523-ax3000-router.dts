@@ -132,7 +132,17 @@
 			gpios = <&gpio0 7 GPIO_ACTIVE_LOW>;
 			default-state = "off";
 		};
-	};
+
+		led-wifi-2g {
+			label = "green:wifi-2g";
+			gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
+		};
+
+		led-wifi-5g {
+			label = "green:wifi-5g";
+			gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;
+		};
+		};
 
 	keys {
 		compatible = "gpio-keys-polled";
